@@ -19,9 +19,7 @@ def skeletonize_image(image,CSV_FILE):
     #csv 검출
     df = pd.read_csv(CSV_FILE)
     search_name = os.path.splitext(os.path.basename(image))[0]
-
     df['pure_name']=df['filename'].apply(lambda x: os.path.splitext(x)[0])
-
     row = df[df['pure_name'] == search_name]
 
     plt.figure(figsize=(12,10))
@@ -40,8 +38,20 @@ def skeletonize_image(image,CSV_FILE):
         ux, uy = row['U_x'].values[0], row['U_y'].values[0]
         dx, dy = row['D_x'].values[0], row['D_y'].values[0]
 
+        plt.plot([ux,dx], [uy,dy], color='blue', linestyle='--', linewidth=1,label='Guide Line')
+
+        ys, xs= np.where(skeleton>0)
+        skeleton_points = np.column_stack((xs,ys))
+
+        mid_x, mid_y = (ux+dx) /2, (uy+dy)/2
+
+        distances = np.linalg.norm(skeleton_points - np.array([mid_x, mid_y]), axis=1)
+        closet_idx = np.argmin(distances)
+        smx, smy = skeleton_points[closet_idx]
+
         plt.scatter(ux, uy, c="Green", s=30)
         plt.scatter(dx, dy, c="Yellow", s=30)
+        plt.scatter(smx, smy, c="black", s=30)
         plt.title("Overlay with Points Image")
 
     plt.tight_layout()
