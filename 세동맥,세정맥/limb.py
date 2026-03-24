@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import os
 from skimage.morphology import skeletonize
+from scipy.ndimage import convolve
 
 def skeletonize_image(image,CSV_FILE):
 
@@ -53,6 +54,19 @@ def skeletonize_image(image,CSV_FILE):
         plt.scatter(dx, dy, c="Yellow", s=30)
         plt.scatter(smx, smy, c="black", s=30)
         plt.title("Overlay with Points Image")
+
+        # 커널을 이용한 교차점 bracnh 점 추출
+        kernel = np.array([[1,1,1],
+                           [1,10,1],
+                           [1,1,1]])
+        
+        filtered = convolve(skeleton.astype(np.uint8), kernel, mode='constant', cval = 0)
+
+        branch_ys, branch_xs = np.where(filtered >= 13)
+
+        if len(branch_xs) > 0:
+            plt.scatter(branch_xs, branch_ys, c="black", s=30)
+
 
     plt.tight_layout()
     plt.show()
