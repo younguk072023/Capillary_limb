@@ -72,8 +72,6 @@ def skeletonize_image(image,CSV_FILE):
 
         branch_ys, branch_xs = np.where(filtered >= 13)
 
-        cut_mask = np.zeros_like(skeleton, dtype=np.uint8)
-
         if len(branch_xs) > 0:
             plt.scatter(branch_xs, branch_ys, c="blue", s=30, label="branch")
             
@@ -103,10 +101,12 @@ def skeletonize_image(image,CSV_FILE):
         labeled_skel = label(cut_skeleton)
 
         _, indices = distance_transform_edt(labeled_skel == 0, return_indices=True)
+        
         labeled_mask = labeled_skel[indices[0], indices[1]]
         labeled_mask[~binary_image] = 0
 
         dist_map = distance_transform_edt(binary_image)
+
         leg_results=[]  #세동맥 세정맥의 정보 변수
         
         for i in range(1, labeled_skel.max()+1):
@@ -149,7 +149,7 @@ def skeletonize_image(image,CSV_FILE):
         plt.scatter(smx,smy, c="white", s= 30, label="cut apex")
         if len(branch_xs) > 0:
             plt.scatter(bx,by, c= "white", s= 30, label="cut branch")
-
+            
         plt.title(f"Separated ({mode})")
         plt.legend()
         plt.tight_layout()
