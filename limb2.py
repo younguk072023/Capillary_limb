@@ -331,4 +331,4 @@ def skeletonize_image(image, CSV_FILE):
     plt.show()
 
 CSV_FILE = "capillary_keypoint_final.csv"
-skeletonize_image("p9_det_019_crop_3.tif", CSV_FILE)
+skeletonize_image("p1_det_050.tif", CSV_FILE)
