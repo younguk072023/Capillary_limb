@@ -123,7 +123,7 @@ def generate_clinical_crossing_mask(cx=256, top_y=120, bottom_y=480, art_thick=1
         current_y = pts[i][1]
         current_thickness = get_thickness(i, current_y)
 
-        # 🌟 첫 번째 교차점 이전 상단 다리 라벨링 (유지)
+        # 첫 번째 교차점 이전 상단 다리 라벨링 (유지)
         if safe_zone_top < current_y < safe_zone_bottom:
             if i < total_points // 2: 
                 if current_thickness > max_art_thick:

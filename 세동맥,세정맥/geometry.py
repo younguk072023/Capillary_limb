@@ -19,6 +19,7 @@ def order_component_path(comp_mask, apex_ref, branch_ref=None):
     else:
         start_pt = min(points, key=lambda p: np.hypot(p[1]-apex_ref[1], p[0]-apex_ref[0]))
 
+    #branch가 있다면 그 근처의 끝점을 종점으로 잡고, 없다면 출발지점에서 가장 멀리있는 끝점을 종점으로 잡음.
     end_pt = None
     #branch와 가까운 점
     if len(endpoints) >= 2:
@@ -33,6 +34,7 @@ def order_component_path(comp_mask, apex_ref, branch_ref=None):
     prev = None
     cur = start_pt
 
+    # 한칸씩 이동하여 경로 추적
     while True:
         neighs = [p for p in get_neighbors(cur[0], cur[1], comp_mask) if p != prev]
         if len(neighs) == 0: break
