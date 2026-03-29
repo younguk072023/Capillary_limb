@@ -1,10 +1,11 @@
+import os
+from collections import deque
+
 import cv2
 import numpy as np
 import pandas as pd
-import os
 import matplotlib.pyplot as plt
 
-from collections import deque
 from scipy.ndimage import distance_transform_edt
 from skimage.measure import label
 from skimage.morphology import skeletonize
@@ -37,32 +38,6 @@ def smooth_1d(arr, k=5):
     return np.convolve(padded, kernel, mode="valid")
 
 
-def bfs_shortest_path_within_mask(comp_mask, start, goal):
-    q = deque([start])
-    parent = {start: None}
-
-    while q:
-        cur = q.popleft()
-        if cur == goal:
-            break
-
-        for nxt in get_neighbors(cur[0], cur[1], comp_mask):
-            if nxt not in parent:
-                parent[nxt] = cur
-                q.append(nxt)
-
-    if goal not in parent:
-        return [start]
-
-    path = []
-    cur = goal
-    while cur is not None:
-        path.append(cur)
-        cur = parent[cur]
-    path.reverse()
-    return path
-
-
 def geodesic_distances_from_seed(mask, seed):
     q = deque([seed])
     dist = {seed: 0}
@@ -86,6 +61,12 @@ def reconstruct_path(parent, end_pt):
         cur = parent[cur]
     path.reverse()
     return path
+
+
+def read_image_unicode(image_path):
+    img_array = np.fromfile(image_path, np.uint8)
+    img = cv2.imdecode(img_array, cv2.IMREAD_GRAYSCALE)
+    return img
 
 
 """
@@ -113,11 +94,6 @@ def build_cut_skeleton(skeleton, apex_pt, branch_pt=None, dilate_size=3):
 
 
 def find_bottom_of_inner_hole(binary_image, D_pt, dir_v):
-    """
-    D점 아래쪽 내부 hole에 seed를 찍고,
-    그 connected component 중 dir_v 방향으로 가장 아래에 있는 점을 반환
-    반환: (y, x) or None
-    """
     h, w = binary_image.shape
     bg_mask = (~binary_image).astype(np.uint8)
 
@@ -153,93 +129,89 @@ def find_bottom_of_inner_hole(binary_image, D_pt, dir_v):
 
 """
 ===========================================================
-3. 두 다리 seed를 apex 근처에서 직접 찾기
+3. U-D 사이 구간에서 좌/우 limb 시작점 찾기
 ===========================================================
 """
-def get_candidate_seeds_near_apex(cut_skeleton, apex_pt, max_radius=12):
-    """
-    apex 주변에서 서로 다른 방향으로 나가는 skeleton seed 후보를 찾음
-    """
-    ay, ax = apex_pt
-    h, w = cut_skeleton.shape
+def sample_perp_line_points(center_xy, perp_v, half_len=20, num=81):
+    cx, cy = center_xy
+    ts = np.linspace(-half_len, half_len, num)
+    pts = []
+    for t in ts:
+        x = int(round(cx + perp_v[0] * t))
+        y = int(round(cy + perp_v[1] * t))
+        pts.append((y, x))
+    return pts
+
+
+def find_left_right_seed_on_crossline(skeleton, center_xy, perp_v, img_shape, min_sep=3):
+    h, w = img_shape
+    pts = sample_perp_line_points(center_xy, perp_v, half_len=25, num=101)
+
+    hits = []
+    for (y, x) in pts:
+        if 0 <= y < h and 0 <= x < w and skeleton[y, x]:
+            hits.append((y, x))
+
+    if len(hits) < 2:
+        return None, None
+
+    xs = np.array([p[1] for p in hits])
+    median_x = np.median(xs)
+
+    left_candidates = [p for p in hits if p[1] < median_x]
+    right_candidates = [p for p in hits if p[1] >= median_x]
+
+    if len(left_candidates) == 0 or len(right_candidates) == 0:
+        return None, None
+
+    left_seed = min(left_candidates, key=lambda p: p[1])
+    right_seed = max(right_candidates, key=lambda p: p[1])
+
+    if abs(right_seed[1] - left_seed[1]) < min_sep:
+        return None, None
+
+    return left_seed, right_seed
+
+
+def find_two_leg_seeds_between_U_and_D(skeleton, U_pt, D_pt):
+    Ux, Uy = U_pt
+    Dx, Dy = D_pt
+
+    axis_v = np.array([Dx - Ux, Dy - Uy], dtype=float)
+    norm = np.linalg.norm(axis_v)
+    if norm < 1e-6:
+        return None
+
+    dir_v = axis_v / norm
+    perp_v = np.array([-dir_v[1], dir_v[0]], dtype=float)
+
     candidates = []
 
-    for r in range(1, max_radius + 1):
-        for y in range(max(0, ay - r), min(h, ay + r + 1)):
-            for x in range(max(0, ax - r), min(w, ax + r + 1)):
-                if not cut_skeleton[y, x]:
-                    continue
-                d = np.hypot(y - ay, x - ax)
-                if d <= r:
-                    candidates.append((y, x))
+    for alpha in np.linspace(0.15, 0.85, 15):
+        cx = Ux + alpha * (Dx - Ux)
+        cy = Uy + alpha * (Dy - Uy)
 
-        if len(candidates) >= 2:
-            break
+        left_seed, right_seed = find_left_right_seed_on_crossline(
+            skeleton=skeleton,
+            center_xy=(cx, cy),
+            perp_v=perp_v,
+            img_shape=skeleton.shape,
+            min_sep=3
+        )
 
-    # 중복/가까운 점 제거
-    unique = []
-    for pt in sorted(candidates, key=lambda p: np.hypot(p[0]-ay, p[1]-ax)):
-        too_close = False
-        for q in unique:
-            if np.hypot(pt[0]-q[0], pt[1]-q[1]) <= 2:
-                too_close = True
-                break
-        if not too_close:
-            unique.append(pt)
+        if left_seed is not None and right_seed is not None:
+            score = abs(right_seed[1] - left_seed[1])
+            candidates.append((score, left_seed, right_seed))
 
-    return unique
+    if len(candidates) == 0:
+        return None
+
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    _, left_seed, right_seed = candidates[0]
+    return left_seed, right_seed
 
 
-def choose_two_leg_seeds(cut_skeleton, apex_pt):
-    """
-    apex 주변 seed 후보 중 좌우로 가장 잘 벌어지는 2개를 선택
-    """
-    ay, ax = apex_pt
-    candidates = get_candidate_seeds_near_apex(cut_skeleton, apex_pt, max_radius=15)
-
-    if len(candidates) < 2:
-        ys, xs = np.where(cut_skeleton)
-        pts = list(zip(ys, xs))
-        if len(pts) < 2:
-            return []
-        pts = sorted(pts, key=lambda p: np.hypot(p[0]-ay, p[1]-ax))
-        candidates = pts[:20]
-
-    best_pair = None
-    best_score = -float("inf")
-
-    for i in range(len(candidates)):
-        for j in range(i + 1, len(candidates)):
-            p1, p2 = candidates[i], candidates[j]
-
-            v1 = np.array([p1[1] - ax, p1[0] - ay], dtype=float)
-            v2 = np.array([p2[1] - ax, p2[0] - ay], dtype=float)
-
-            n1 = np.linalg.norm(v1)
-            n2 = np.linalg.norm(v2)
-            if n1 < 1e-6 or n2 < 1e-6:
-                continue
-
-            # 각도가 충분히 벌어지고, 좌우 분리가 되는 pair 선호
-            cosang = np.dot(v1, v2) / (n1 * n2)
-            sep_x = abs(p1[1] - p2[1])
-            score = (1.0 - cosang) * 10.0 + sep_x
-
-            if score > best_score:
-                best_score = score
-                best_pair = [p1, p2]
-
-    if best_pair is None:
-        return []
-
-    best_pair = sorted(best_pair, key=lambda p: p[1])  # left, right
-    return best_pair
-
-
-def trace_single_leg_path(cut_skeleton, seed_pt):
-    """
-    seed에서 가장 멀리 있는 skeleton 점까지 path 추적
-    """
+def trace_leg_from_seed(cut_skeleton, seed_pt):
     dist, parent = geodesic_distances_from_seed(cut_skeleton, seed_pt)
     if len(dist) == 0:
         return []
@@ -249,12 +221,20 @@ def trace_single_leg_path(cut_skeleton, seed_pt):
     return path
 
 
-def extract_two_leg_paths(skeleton, apex_pt, branch_pt=None):
-    """
-    핵심:
-    component selected_ids에 의존하지 않고,
-    apex cut 이후 seed 2개를 직접 찾아 각각 path를 뽑음
-    """
+def orient_path_from_top_seed(path, U_pt):
+    if len(path) < 2:
+        return path
+
+    Ux, Uy = U_pt
+    d0 = np.hypot(path[0][1] - Ux, path[0][0] - Uy)
+    d1 = np.hypot(path[-1][1] - Ux, path[-1][0] - Uy)
+
+    if d1 < d0:
+        path = path[::-1]
+    return path
+
+
+def extract_two_leg_paths(skeleton, apex_pt, U_pt, D_pt, branch_pt=None):
     retry_configs = [
         (branch_pt, 3),
         (branch_pt, 1),
@@ -262,48 +242,49 @@ def extract_two_leg_paths(skeleton, apex_pt, branch_pt=None):
         (None, 1),
     ]
 
-    best_paths = []
+    best_result = None
 
     for current_branch, dilate_size in retry_configs:
         cut_skeleton, _ = build_cut_skeleton(skeleton, apex_pt, current_branch, dilate_size)
-        seeds = choose_two_leg_seeds(cut_skeleton, apex_pt)
 
-        if len(seeds) < 2:
+        seeds = find_two_leg_seeds_between_U_and_D(cut_skeleton, U_pt, D_pt)
+        if seeds is None:
             continue
 
-        paths = []
-        for seed in seeds:
-            path = trace_single_leg_path(cut_skeleton, seed)
-            if len(path) >= 5:
-                paths.append(path)
+        left_seed, right_seed = seeds
 
-        if len(paths) > len(best_paths):
-            best_paths = paths
+        left_path = trace_leg_from_seed(cut_skeleton, left_seed)
+        right_path = trace_leg_from_seed(cut_skeleton, right_seed)
 
-        if len(paths) == 2:
-            return {
-                "paths": sorted(paths, key=lambda path: np.mean([p[1] for p in path])),
-                "branch_pt": current_branch,
-                "cut_skeleton": cut_skeleton
-            }
+        left_path = orient_path_from_top_seed(left_path, U_pt)
+        right_path = orient_path_from_top_seed(right_path, U_pt)
 
-    if len(best_paths) > 0:
-        return {
-            "paths": sorted(best_paths, key=lambda path: np.mean([p[1] for p in path])),
-            "branch_pt": branch_pt,
-            "cut_skeleton": cut_skeleton
+        valid_count = int(len(left_path) >= 5) + int(len(right_path) >= 5)
+
+        result = {
+            "paths": [left_path, right_path],
+            "branch_pt": current_branch,
+            "cut_skeleton": cut_skeleton,
+            "left_seed": left_seed,
+            "right_seed": right_seed,
+            "valid_count": valid_count
         }
 
-    return None
+        if best_result is None or result["valid_count"] > best_result["valid_count"]:
+            best_result = result
+
+        if valid_count == 2:
+            return result
+
+    return best_result
 
 
 """
 ===========================================================
-4. path trim
+4. 순차적 스켈레톤 추적 및 Trim
 ===========================================================
 """
-def trim_path_between_red_and_blue_lines(path, U_pt, D_pt, branch_pt=None,
-                                         end_margin_ratio=0, min_keep=8):
+def trim_path_for_measurement(path, U_pt, D_pt, branch_pt=None, min_keep=8, pixel_margin=1.0):
     vec_axis = np.array([D_pt[0] - U_pt[0], D_pt[1] - U_pt[1]], dtype=float)
     norm = np.linalg.norm(vec_axis)
     dir_v = np.array([0.0, 1.0]) if norm < 1e-5 else vec_axis / norm
@@ -314,31 +295,29 @@ def trim_path_between_red_and_blue_lines(path, U_pt, D_pt, branch_pt=None,
         B_vec = np.array([branch_pt[1], branch_pt[0]], dtype=float)
 
     trimmed = []
+    recording = False
+
     for pt in path:
         P = np.array([pt[1], pt[0]], dtype=float)
 
         proj_D = np.dot(P - D_vec, dir_v)
-        if proj_D < 0:
-            continue
 
-        if branch_pt is not None:
+        if not recording and proj_D >= pixel_margin:
+            recording = True
+
+        if recording and branch_pt is not None:
             proj_B = np.dot(P - B_vec, dir_v)
-            if proj_B > 0:
-                continue
+            if proj_B > -pixel_margin:
+                break
 
-        trimmed.append(pt)
+        if recording:
+            trimmed.append(pt)
 
     if len(trimmed) == 0:
         return [], None, None, dir_v
 
     if len(trimmed) < min_keep:
-        return trimmed, trimmed[0], trimmed[-1], dir_v
-
-    n = len(trimmed)
-    margin = max(1, int(n * end_margin_ratio))
-
-    if n - 2 * margin >= min_keep:
-        trimmed = trimmed[margin:n - margin]
+        return [], None, None, dir_v
 
     return trimmed, trimmed[0], trimmed[-1], dir_v
 
@@ -405,129 +384,34 @@ def get_stable_max_diameter(trimmed_path, dist_map,
 
 """
 ===========================================================
-6. 시각화 및 출력
+6. 단일 이미지 분석 엔진
 ===========================================================
 """
-def plot_and_print_results(search_name, leg_results, labeled_mask, U_pt, D_pt, used_branch_pt, dir_v):
-    print(f"\n{'=' * 60}")
-    print(f"이미지 파일: {search_name}")
-
-    # 두 다리 다 구한 뒤 큰 쪽=세정맥, 다음=세동맥
-    sorted_leg_results = sorted(leg_results, key=lambda x: x["max_d"], reverse=True)
-
-    if len(sorted_leg_results) >= 2:
-        sorted_leg_results[0]["vessel_type"] = "Venous"
-        sorted_leg_results[1]["vessel_type"] = "Arterial"
-
-        print(f"- 세정맥(Venous)")
-        print(f"  · 최대 limb 직경: {sorted_leg_results[0]['max_d']:.2f} px")
-        print(f"- 세동맥(Arterial)")
-        print(f"  · 최대 limb 직경: {sorted_leg_results[1]['max_d']:.2f} px")
-    else:
-        for idx, res in enumerate(sorted_leg_results):
-            print(f"- Leg {idx + 1}")
-            print(f"  · 최대 limb 직경: {res['max_d']:.2f} px")
-
-    print(f"{'=' * 60}\n")
-
-    plt.figure(figsize=(8, 8), facecolor="black")
-    plt.imshow(labeled_mask, cmap="nipy_spectral")
-
-    # 좌우 정렬 기준 시각화
-    for idx, res in enumerate(leg_results):
-        side = "Left Leg" if idx == 0 else "Right Leg"
-
-        px = [p[1] for p in res["path"]]
-        py = [p[0] for p in res["path"]]
-        plt.plot(px, py, color="white", linewidth=1.2, alpha=0.45, zorder=1)
-
-        tx = [p[1] for p in res["trimmed_path"]]
-        ty = [p[0] for p in res["trimmed_path"]]
-        plt.plot(tx, ty, color="black", linewidth=3, label=f"{side} trimmed" if idx == 0 else None, zorder=2)
-
-        label_txt = res.get("final_label", side)
-        plt.scatter(
-            res["max_x"], res["max_y"],
-            c="red", s=85, edgecolors="white", zorder=6,
-            label=f"{label_txt} max" if idx == 0 else None
-        )
-
-    D_vec = np.array([D_pt[0], D_pt[1]], dtype=float)
-
-    plt.scatter(U_pt[0], U_pt[1], c="gray", s=55, edgecolors="white", label="U-point", zorder=5)
-    plt.scatter(D_vec[0], D_vec[1], c="red", s=65, edgecolors="white", label="D-point", zorder=5)
-
-    perp_v = np.array([-dir_v[1], dir_v[0]], dtype=float)
-
-    p1_red = D_vec + perp_v * 150
-    p2_red = D_vec - perp_v * 150
-    plt.plot(
-        [p1_red[0], p2_red[0]],
-        [p1_red[1], p2_red[1]],
-        color="red", linestyle="-", linewidth=2,
-        label="Top cutoff", zorder=3
-    )
-
-    if used_branch_pt is not None:
-        B_vec = np.array([used_branch_pt[1], used_branch_pt[0]], dtype=float)
-
-        plt.scatter(
-            B_vec[0], B_vec[1],
-            c="lime", s=70, edgecolors="black", marker="s",
-            label="Inner-hole bottom", zorder=5
-        )
-
-        p1_blue = B_vec + perp_v * 150
-        p2_blue = B_vec - perp_v * 150
-        plt.plot(
-            [p1_blue[0], p2_blue[0]],
-            [p1_blue[1], p2_blue[1]],
-            color="blue", linestyle="-", linewidth=2,
-            label="Bottom cutoff", zorder=3
-        )
-
-    plt.title("Two-Leg Limb Diameter Measurement", color="white")
-    plt.legend(fontsize="small", loc="upper right")
-    plt.axis("off")
-    plt.tight_layout()
-    plt.show()
-
-
-"""
-===========================================================
-7. 메인
-===========================================================
-"""
-def skeletonize_image(image_path, csv_file):
-    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+def analyze_single_image(image_path, df_keypoints):
+    img = read_image_unicode(image_path)
     if img is None:
-        print("이미지를 읽지 못했습니다.")
-        return
+        return {"ok": False, "reason": f"이미지를 읽지 못했습니다: {image_path}"}
 
     binary_image = img > 127
     skeleton = skeletonize(binary_image)
 
     labeled_full = label(skeleton)
     if labeled_full.max() == 0:
-        print("스켈레톤이 없습니다.")
-        return
+        return {"ok": False, "reason": "스켈레톤이 없습니다."}
 
     counts = np.bincount(labeled_full.flat)
     main_label = np.argmax(counts[1:]) + 1
     skeleton = (labeled_full == main_label)
 
-    df = pd.read_csv(csv_file)
     search_name = os.path.splitext(os.path.basename(image_path))[0]
-    row = df[df["filename"].apply(lambda x: os.path.splitext(str(x))[0]) == search_name]
+    row = df_keypoints[df_keypoints["filename"].apply(lambda x: os.path.splitext(str(x))[0]) == search_name]
 
     if row.empty:
-        print(f"{search_name} 에 해당하는 CSV 행이 없습니다.")
-        return
+        return {"ok": False, "reason": f"{search_name} 에 해당하는 CSV 행이 없습니다."}
 
     ux, uy = row["U_x"].values[0], row["U_y"].values[0]
     dx, dy = row["D_x"].values[0], row["D_y"].values[0]
 
-    # 원본 코드 좌표계 유지
     U_pt = (ux, uy)
     D_pt = (dx, dy)
 
@@ -538,24 +422,23 @@ def skeletonize_image(image_path, csv_file):
     ys, xs = np.where(skeleton > 0)
     skeleton_points = np.column_stack((xs, ys))
 
-    apex_pt_idx = np.argmin(np.linalg.norm(skeleton_points - np.array([dx, dy]), axis=1))
-    smx, smy = skeleton_points[apex_pt_idx]
-    apex_pt = (int(smy), int(smx))   # (y, x)
+    u_vec = np.array([ux, uy])
+    true_apex_idx = np.argmax(np.linalg.norm(skeleton_points - u_vec, axis=1))
+    smx, smy = skeleton_points[true_apex_idx]
+    apex_pt = (int(smy), int(smx))
 
     used_branch_pt = find_bottom_of_inner_hole(binary_image, D_pt, dir_v)
 
-    # 핵심 변경:
-    # component id 기반이 아니라 seed 2개 기반으로 두 path를 직접 확보
-    split_result = extract_two_leg_paths(skeleton, apex_pt, used_branch_pt)
-    if split_result is None or len(split_result["paths"]) == 0:
-        print("두 다리 path 추출에 실패했습니다.")
-        return
+    split_result = extract_two_leg_paths(skeleton, apex_pt, U_pt, D_pt, used_branch_pt)
+    if split_result is None:
+        return {"ok": False, "reason": "두 다리 path 추출에 실패했습니다."}
 
     used_branch_pt = split_result["branch_pt"]
     cut_skeleton = split_result["cut_skeleton"]
     raw_paths = split_result["paths"]
+    left_seed = split_result.get("left_seed", None)
+    right_seed = split_result.get("right_seed", None)
 
-    # 보기용 labeled mask
     labeled_cut = label(cut_skeleton)
     _, indices = distance_transform_edt(labeled_cut == 0, return_indices=True)
     labeled_mask = labeled_cut[indices[0], indices[1]]
@@ -569,13 +452,13 @@ def skeletonize_image(image_path, csv_file):
         if len(path) < 2:
             continue
 
-        trimmed_path, start_pt, end_pt, _ = trim_path_between_red_and_blue_lines(
+        trimmed_path, start_pt, end_pt, _ = trim_path_for_measurement(
             path,
             U_pt,
             D_pt,
             used_branch_pt,
-            end_margin_ratio=0,
-            min_keep=8
+            min_keep=8,
+            pixel_margin=1.0
         )
 
         if len(trimmed_path) == 0:
@@ -610,30 +493,266 @@ def skeletonize_image(image_path, csv_file):
         })
 
     if len(leg_results) == 0:
-        print("유효한 limb 결과가 없습니다.")
-        return
+        return {"ok": False, "reason": "유효한 limb 결과가 없습니다."}
 
-    # 좌우 정렬
     leg_results.sort(key=lambda x: x["mean_x"])
 
-    # 최종 라벨링: 두 개 다 구한 뒤 더 큰 쪽을 Venous, 나머지를 Arterial
     if len(leg_results) >= 2:
         by_size = sorted(range(len(leg_results)), key=lambda i: leg_results[i]["max_d"], reverse=True)
         leg_results[by_size[0]]["final_label"] = "Venous"
         leg_results[by_size[1]]["final_label"] = "Arterial"
 
-    plot_and_print_results(
-        search_name=search_name,
-        leg_results=leg_results,
-        labeled_mask=labeled_mask,
-        U_pt=U_pt,
-        D_pt=D_pt,
-        used_branch_pt=used_branch_pt,
-        dir_v=dir_v
-    )
+    return {
+        "ok": True,
+        "image_path": image_path,
+        "search_name": search_name,
+        "img": img,
+        "binary_image": binary_image,
+        "skeleton": skeleton,
+        "cut_skeleton": cut_skeleton,
+        "labeled_mask": labeled_mask,
+        "leg_results": leg_results,
+        "U_pt": U_pt,
+        "D_pt": D_pt,
+        "used_branch_pt": used_branch_pt,
+        "dir_v": dir_v,
+        "left_seed": left_seed,
+        "right_seed": right_seed
+    }
 
 
+"""
+===========================================================
+7. 키보드/휠 인터랙티브 뷰어
+===========================================================
+"""
+class CapillaryViewer:
+    def __init__(self, image_dir, csv_path):
+        self.image_dir = image_dir
+        self.csv_path = csv_path
+
+        self.df_keypoints = pd.read_csv(csv_path)
+
+        valid_ext = (".tif", ".tiff", ".png", ".jpg", ".jpeg", ".bmp")
+        self.image_files = sorted(
+            [f for f in os.listdir(image_dir) if f.lower().endswith(valid_ext)]
+        )
+
+        if len(self.image_files) == 0:
+            raise FileNotFoundError(f"이미지 파일이 없습니다: {image_dir}")
+
+        self.index = 0
+        self.current_xlim = None
+        self.current_ylim = None
+
+        self.fig, self.ax = plt.subplots(figsize=(10, 10), facecolor="black")
+        self.fig.canvas.manager.set_window_title("Capillary Viewer")
+
+        self.fig.canvas.mpl_connect("key_press_event", self.on_key_press)
+        self.fig.canvas.mpl_connect("scroll_event", self.on_scroll)
+
+        self.update_view(reset_zoom=True)
+        plt.show()
+
+    def get_current_image_path(self):
+        return os.path.join(self.image_dir, self.image_files[self.index])
+
+    def update_view(self, reset_zoom=False):
+        self.ax.clear()
+
+        image_path = self.get_current_image_path()
+        result = analyze_single_image(image_path, self.df_keypoints)
+
+        if not result["ok"]:
+            self.ax.imshow(np.zeros((512, 512)), cmap="gray")
+            self.ax.text(
+                0.5, 0.5,
+                f"[{self.index + 1}/{len(self.image_files)}]\n{os.path.basename(image_path)}\n\n{result['reason']}",
+                transform=self.ax.transAxes,
+                ha="center", va="center",
+                color="red", fontsize=12
+            )
+            self.ax.axis("off")
+            self.fig.tight_layout()
+            self.fig.canvas.draw()
+            return
+
+        img = result["img"]
+        leg_results = result["leg_results"]
+        labeled_mask = result["labeled_mask"]
+        U_pt = result["U_pt"]
+        D_pt = result["D_pt"]
+        used_branch_pt = result["used_branch_pt"]
+        dir_v = result["dir_v"]
+        left_seed = result["left_seed"]
+        right_seed = result["right_seed"]
+        search_name = result["search_name"]
+
+        self.ax.imshow(img, cmap="gray")
+
+        # 배경 위에 labeled mask 살짝 덮기
+        overlay = np.ma.masked_where(labeled_mask == 0, labeled_mask)
+        self.ax.imshow(overlay, cmap="nipy_spectral", alpha=0.25)
+
+        # 결과 텍스트
+        result_text = []
+        if len(leg_results) >= 2:
+            sorted_leg_results = sorted(leg_results, key=lambda x: x["max_d"], reverse=True)
+            result_text.append(f"Venous: {sorted_leg_results[0]['max_d']:.2f}px")
+            result_text.append(f"Arterial: {sorted_leg_results[1]['max_d']:.2f}px")
+        else:
+            for i, r in enumerate(leg_results):
+                result_text.append(f"Leg{i+1}: {r['max_d']:.2f}px")
+
+        # path 표시
+        for idx, res in enumerate(leg_results):
+            side = "Left" if idx == 0 else "Right"
+            line_color = "cyan" if idx == 0 else "yellow"
+
+            px = [p[1] for p in res["path"]]
+            py = [p[0] for p in res["path"]]
+            self.ax.plot(px, py, color="white", linewidth=1.0, alpha=0.35, zorder=1)
+
+            tx = [p[1] for p in res["trimmed_path"]]
+            ty = [p[0] for p in res["trimmed_path"]]
+            self.ax.plot(tx, ty, color="black", linewidth=4, zorder=2)
+            self.ax.plot(tx, ty, color=line_color, linewidth=2.0, zorder=3, label=f"{side} measured")
+
+            self.ax.scatter(
+                res["max_x"], res["max_y"],
+                c="red", s=70, edgecolors="white", zorder=6
+            )
+            self.ax.text(
+                res["max_x"], res["max_y"] - 12,
+                f"{res['max_d']:.2f}",
+                color="white", fontsize=9, ha="center", va="bottom",
+                bbox=dict(boxstyle="round,pad=0.2", fc="black", ec="none", alpha=0.6)
+            )
+
+        if left_seed is not None:
+            self.ax.scatter(left_seed[1], left_seed[0], c="cyan", s=70, edgecolors="black", marker="o", zorder=7)
+        if right_seed is not None:
+            self.ax.scatter(right_seed[1], right_seed[0], c="yellow", s=70, edgecolors="black", marker="o", zorder=7)
+
+        # U, D
+        self.ax.scatter(U_pt[0], U_pt[1], c="gray", s=55, edgecolors="white", zorder=7, label="U-point")
+        self.ax.scatter(D_pt[0], D_pt[1], c="red", s=65, edgecolors="white", zorder=7, label="D-point")
+
+        perp_v = np.array([-dir_v[1], dir_v[0]], dtype=float)
+
+        # red line
+        D_vec = np.array([D_pt[0], D_pt[1]], dtype=float)
+        p1_red = D_vec + perp_v * 150
+        p2_red = D_vec - perp_v * 150
+        self.ax.plot(
+            [p1_red[0], p2_red[0]],
+            [p1_red[1], p2_red[1]],
+            color="red", linestyle="-", linewidth=2,
+            zorder=4, label="Apex width line"
+        )
+
+        # blue line
+        if used_branch_pt is not None:
+            B_vec = np.array([used_branch_pt[1], used_branch_pt[0]], dtype=float)
+            self.ax.scatter(B_vec[0], B_vec[1], c="lime", s=70, edgecolors="black", marker="s", zorder=7)
+
+            p1_blue = B_vec + perp_v * 150
+            p2_blue = B_vec - perp_v * 150
+            self.ax.plot(
+                [p1_blue[0], p2_blue[0]],
+                [p1_blue[1], p2_blue[1]],
+                color="blue", linestyle="-", linewidth=2,
+                zorder=4, label="Bottom cutoff"
+            )
+
+        title_main = f"[{self.index + 1}/{len(self.image_files)}] {search_name}"
+        title_sub = " | ".join(result_text)
+        self.ax.set_title(f"{title_main}\n{title_sub}", color="white", fontsize=12, pad=14)
+
+        self.ax.axis("off")
+        self.ax.legend(fontsize="small", loc="upper right")
+        self.fig.tight_layout()
+
+        if reset_zoom or self.current_xlim is None or self.current_ylim is None:
+            self.ax.set_xlim(0, img.shape[1])
+            self.ax.set_ylim(img.shape[0], 0)
+            self.current_xlim = self.ax.get_xlim()
+            self.current_ylim = self.ax.get_ylim()
+        else:
+            self.ax.set_xlim(self.current_xlim)
+            self.ax.set_ylim(self.current_ylim)
+
+        self.fig.canvas.draw()
+
+    def on_key_press(self, event):
+        if event.key == "right":
+            self.index = (self.index + 1) % len(self.image_files)
+            self.current_xlim = None
+            self.current_ylim = None
+            self.update_view(reset_zoom=True)
+
+        elif event.key == "left":
+            self.index = (self.index - 1) % len(self.image_files)
+            self.current_xlim = None
+            self.current_ylim = None
+            self.update_view(reset_zoom=True)
+
+        elif event.key == "r":
+            self.current_xlim = None
+            self.current_ylim = None
+            self.update_view(reset_zoom=True)
+
+    def on_scroll(self, event):
+        if event.xdata is None or event.ydata is None:
+            return
+
+        base_scale = 1.2
+        cur_xlim = self.ax.get_xlim()
+        cur_ylim = self.ax.get_ylim()
+
+        if event.button == "up":
+            scale_factor = 1 / base_scale
+        elif event.button == "down":
+            scale_factor = base_scale
+        else:
+            scale_factor = 1.0
+
+        xdata = event.xdata
+        ydata = event.ydata
+
+        cur_width = (cur_xlim[1] - cur_xlim[0])
+        cur_height = (cur_ylim[1] - cur_ylim[0])
+
+        new_width = cur_width * scale_factor
+        new_height = cur_height * scale_factor
+
+        relx = (cur_xlim[1] - xdata) / (cur_width + 1e-12)
+        rely = (cur_ylim[1] - ydata) / (cur_height + 1e-12)
+
+        new_xlim = [xdata - new_width * (1 - relx), xdata + new_width * relx]
+        new_ylim = [ydata - new_height * (1 - rely), ydata + new_height * rely]
+
+        self.ax.set_xlim(new_xlim)
+        self.ax.set_ylim(new_ylim)
+
+        self.current_xlim = self.ax.get_xlim()
+        self.current_ylim = self.ax.get_ylim()
+
+        self.fig.canvas.draw()
+
+
+"""
+===========================================================
+8. 실행부
+===========================================================
+"""
 if __name__ == "__main__":
-    CSV_FILE = "capillary_keypoint_final.csv"
-    IMAGE_FILE = "p1_det_050.tif"
-    skeletonize_image(IMAGE_FILE, CSV_FILE)
+    CSV_PATH = r"capillary_keypoint_final.csv"
+    LABEL_DIR = r"D:\usb\MTL_dataset\label"
+
+    if not os.path.exists(CSV_PATH):
+        print(f"CSV 파일이 없습니다: {CSV_PATH}")
+    elif not os.path.exists(LABEL_DIR):
+        print(f"라벨 폴더가 없습니다: {LABEL_DIR}")
+    else:
+        CapillaryViewer(LABEL_DIR, CSV_PATH)
