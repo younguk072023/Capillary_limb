@@ -4,13 +4,115 @@ from scipy.ndimage import distance_transform_edt
 from skimage.measure import label
 from skimage.morphology import skeletonize
 
-from utils import read_image_unicode, snap_xy_to_skeleton
+# [수정] smooth_1d 임포트 추가
+from utils import read_image_unicode, snap_xy_to_skeleton, smooth_1d 
 from core_algorithm import (
     find_bottom_of_inner_hole,
     extract_two_leg_paths,
-    trim_path_for_measurement,
-    get_stable_max_diameter
+    trim_path_for_measurement
 )
+
+# --- [새로 추가된 핵심 엔진: Ray Casting 기반 직경 측정] ---
+def get_stable_max_diameter_raycast(trimmed_path, binary_image, dir_v, smooth_k=5, top_ratio=0.15, min_plateau_len=3):
+    if len(trimmed_path) == 0:
+        return None
+
+    ys = np.array([p[0] for p in trimmed_path])
+    xs = np.array([p[1] for p in trimmed_path])
+    h, w = binary_image.shape
+
+    widths_raw = np.zeros(len(trimmed_path))
+    pvs = []
+    d_pos_list = []
+    d_neg_list = []
+
+    for i in range(len(trimmed_path)):
+        # 로컬 방향(Tangent) 계산
+        t_start = max(0, i - 3)
+        t_end = min(len(trimmed_path) - 1, i + 3)
+        
+        dx_loc = xs[t_end] - xs[t_start]
+        dy_loc = ys[t_end] - ys[t_start]
+        norm_loc = np.hypot(dx_loc, dy_loc)
+        
+        if norm_loc < 1e-6:
+            pv = np.array([-dir_v[1], dir_v[0]], dtype=float)
+        else:
+            pv = np.array([-dy_loc, dx_loc], dtype=float) / norm_loc
+        
+        # 1. 양의 방향(Positive)으로 Ray 쏘기
+        d_pos = 0.0
+        for step in range(1, 150):
+            ny = int(round(ys[i] + pv[1] * step))
+            nx = int(round(xs[i] + pv[0] * step))
+            if ny < 0 or ny >= h or nx < 0 or nx >= w or not binary_image[ny, nx]:
+                d_pos = np.hypot(nx - xs[i], ny - ys[i])
+                break
+        
+        # 2. 음의 방향(Negative)으로 Ray 쏘기
+        d_neg = 0.0
+        for step in range(1, 150):
+            ny = int(round(ys[i] - pv[1] * step))
+            nx = int(round(xs[i] - pv[0] * step))
+            if ny < 0 or ny >= h or nx < 0 or nx >= w or not binary_image[ny, nx]:
+                d_neg = np.hypot(nx - xs[i], ny - ys[i])
+                break
+        
+        # 양방향 거리의 합이 실제 단면적(Diameter)
+        widths_raw[i] = d_pos + d_neg
+        pvs.append(pv)
+        d_pos_list.append(d_pos)
+        d_neg_list.append(d_neg)
+
+    # 지름 데이터 스무딩 및 안정적인 최대값(Plateau) 찾기
+    widths_s = smooth_1d(widths_raw, k=smooth_k)
+    thr = np.quantile(widths_s, 1.0 - top_ratio)
+    candidate_idx = np.where(widths_s >= thr)[0]
+
+    if len(candidate_idx) == 0:
+        best_idx = int(np.argmax(widths_s))
+        return {
+            "max_d": float(widths_s[best_idx]),
+            "max_x": int(xs[best_idx]),
+            "max_y": int(ys[best_idx]),
+            "local_perp_v": pvs[best_idx],
+            "d_pos": float(d_pos_list[best_idx]),  # 비대칭 그리기용
+            "d_neg": float(d_neg_list[best_idx]),  # 비대칭 그리기용
+            "widths_raw": widths_raw,
+            "widths_s": widths_s,
+            "plateau_idx": [best_idx],
+        }
+
+    groups = []
+    current = [candidate_idx[0]]
+    for i in candidate_idx[1:]:
+        if i == current[-1] + 1:
+            current.append(i)
+        else:
+            groups.append(current)
+            current = [i]
+    groups.append(current)
+
+    valid_groups = [g for g in groups if len(g) >= min_plateau_len]
+    if len(valid_groups) == 0:
+        valid_groups = groups
+
+    best_group = max(valid_groups, key=lambda g: (len(g), np.mean(widths_s[g])))
+    center_idx = best_group[len(best_group) // 2]
+    stable_width = float(np.mean(widths_s[best_group]))
+
+    return {
+        "max_d": stable_width,
+        "max_x": int(xs[center_idx]),
+        "max_y": int(ys[center_idx]),
+        "local_perp_v": pvs[center_idx],
+        "d_pos": float(d_pos_list[center_idx]),  # 비대칭 그리기용
+        "d_neg": float(d_neg_list[center_idx]),  # 비대칭 그리기용
+        "widths_raw": widths_raw,
+        "widths_s": widths_s,
+        "plateau_idx": best_group,
+    }
+# --------------------------------------------------------
 
 def analyze_single_image(image_path, df_keypoints):
     img = read_image_unicode(image_path)
@@ -64,27 +166,22 @@ def analyze_single_image(image_path, df_keypoints):
     if right_mask is not None:
         labeled_mask[right_mask] = 2
 
-    dist_map = distance_transform_edt(binary_image)
-
     leg_results = []
     for idx, path in enumerate(raw_paths):
         if len(path) < 2:
             continue
 
         trimmed_path, start_pt, end_pt, _ = trim_path_for_measurement(
-            path,
-            U_xy,
-            D_xy,
-            used_branch_pt,
-            min_keep=5,
-            pixel_margin=0.5,
+            path, U_xy, D_xy, used_branch_pt, min_keep=5, pixel_margin=0.5,
         )
         if len(trimmed_path) == 0:
             continue
 
-        stable_res = get_stable_max_diameter(
+        # [수정] Ray Casting 알고리즘으로 교체!
+        stable_res = get_stable_max_diameter_raycast(
             trimmed_path,
-            dist_map,
+            binary_image,
+            dir_v,
             smooth_k=5,
             top_ratio=0.15,
             min_plateau_len=3,
@@ -93,18 +190,23 @@ def analyze_single_image(image_path, df_keypoints):
             continue
 
         trimmed_xs = np.array([p[1] for p in trimmed_path], dtype=float)
+        
         leg_results.append({
             "id": idx,
             "max_d": float(stable_res["max_d"]),
             "max_x": int(stable_res["max_x"]),
             "max_y": int(stable_res["max_y"]),
+            # [추가] 양쪽 비대칭 거리를 각각 저장
+            "max_d_pos": stable_res["d_pos"],    
+            "max_d_neg": stable_res["d_neg"],    
+            "local_perp_v": stable_res["local_perp_v"], 
             "mean_x": float(np.mean(trimmed_xs)),
             "path": path,
             "trimmed_path": trimmed_path,
             "start_pt": start_pt,
             "end_pt": end_pt,
-            "radii_raw": stable_res["radii_raw"],
-            "radii_s": stable_res["radii_s"],
+            "radii_raw": stable_res["widths_raw"],
+            "radii_s": stable_res["widths_s"],
             "plateau_idx": stable_res["plateau_idx"],
         })
 
