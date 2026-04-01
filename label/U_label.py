@@ -118,7 +118,7 @@ def generate_and_show_30_realistic_samples():
             cx=random.randint(200, 312), top_y=random.randint(60, 180), 
             art_thick=rand_art, ven_thick=rand_ven, is_perfect=is_perfect
         )
-        images.append(img); gt_info.append(gt_thicks)\
+        images.append(img); gt_info.append(gt_thicks)
 
     plt.figure(figsize=(18, 16)) 
     for i in range(30):

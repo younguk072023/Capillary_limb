@@ -8,9 +8,6 @@ import cv2
 # 영욱님의 analyzer 모듈 임포트
 from analyzer import analyze_single_image
 
-# =========================================================
-# 🌟 [보조 함수] 육안 검증(QC)용 상세 시각화 이미지 생성 및 저장
-# =========================================================
 def save_viz_image_for_qc(image_name, result, output_folder):
     """
     CapillaryViewer의 스타일을 적용하여, 
