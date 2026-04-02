@@ -317,7 +317,7 @@ def trim_path_for_measurement(path, U_xy, D_xy, branch_pt=None, min_keep=5, pixe
 
     return trimmed, trimmed[0], trimmed[-1], dir_v
 
-
+# 혈관의 두께 측정에서 안정적인 최대값을 찾아주는 함수
 def get_stable_max_diameter(trimmed_path, dist_map, smooth_k=5, top_ratio=0.15, min_plateau_len=3):
     if len(trimmed_path) == 0:
         return None

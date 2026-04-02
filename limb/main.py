@@ -118,7 +118,7 @@ class CapillaryViewer:
         if right_seed is not None:
             self.ax.scatter(right_seed[1], right_seed[0], c="yellow", s=70, edgecolors="black", marker="o", zorder=7)
         if apex_cut_pt is not None:
-            self.ax.scatter(apex_cut_pt[1], apex_cut_pt[0], c="magenta", s=80, edgecolors="white", marker="x", zorder=7)
+            self.ax.scatter(apex_cut_pt[1], apex_cut_pt[0], c="magenta", s=80, edgecolors="white", marker="o", zorder=7)
 
         self.ax.scatter(U_xy[0], U_xy[1], c="gray", s=55, edgecolors="white", zorder=7, label="U-point")
         self.ax.scatter(D_xy[0], D_xy[1], c="red", s=65, edgecolors="white", zorder=7, label="D-point")
