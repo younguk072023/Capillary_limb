@@ -8,7 +8,7 @@ from utils import (
     find_endpoints,
     smooth_1d
 )
-
+# 자를 위치 표시
 def build_cut_skeleton(skeleton, apex_cut_pt, branch_pt=None, dilate_size=3):
     cut_mask = np.zeros_like(skeleton, dtype=np.uint8)
 
@@ -28,7 +28,7 @@ def build_cut_skeleton(skeleton, apex_cut_pt, branch_pt=None, dilate_size=3):
     cut_skeleton[cut_mask > 0] = False
     return cut_skeleton, cut_mask
 
-
+# 혈관의 분기점이있을 경우 구명의 바닥 부분 찾는 함수
 def find_bottom_of_inner_hole(binary_image, D_xy, dir_v):
     h, w = binary_image.shape
     bg_mask = (~binary_image).astype(np.uint8)
@@ -62,6 +62,7 @@ def find_bottom_of_inner_hole(binary_image, D_xy, dir_v):
 
     return true_bottom_pt
 
+# skeleton의 혈관을 따라가서 양쪽 다리의 가장 큰 길이 구하는 함수
 def sample_perp_line_points(center_xy, perp_v, half_len=24, num=121):
     cx, cy = center_xy
     ts = np.linspace(-half_len, half_len, num)
@@ -75,7 +76,7 @@ def sample_perp_line_points(center_xy, perp_v, half_len=24, num=121):
             last = (y, x)
     return out
 
-
+#왼쪽 다리와 오른쪽 다리를 처음으로 구분해주는 seed찾는 함수
 def find_left_right_seed_on_crossline(skeleton, center_xy, perp_v, img_shape, min_sep=3):
     h, w = img_shape
     pts = sample_perp_line_points(center_xy, perp_v, half_len=28, num=141)
@@ -102,8 +103,8 @@ def find_left_right_seed_on_crossline(skeleton, center_xy, perp_v, img_shape, mi
     if len(clusters) < 2:
         return None, None, None
 
-    left_cluster = clusters[0]
-    right_cluster = clusters[-1]
+    left_cluster = clusters[-1]
+    right_cluster = clusters[0]
 
     left_seed = left_cluster[len(left_cluster) // 2][1:]
     right_seed = right_cluster[len(right_cluster) // 2][1:]
@@ -117,7 +118,7 @@ def find_left_right_seed_on_crossline(skeleton, center_xy, perp_v, img_shape, mi
     score = abs(right_t - left_t)
     return left_seed, right_seed, score
 
-
+# apex width을 찾아주는 함수
 def find_two_leg_seeds_between_U_and_D(skeleton, U_xy, D_xy):
     Ux, Uy = U_xy
     Dx, Dy = D_xy
@@ -131,7 +132,7 @@ def find_two_leg_seeds_between_U_and_D(skeleton, U_xy, D_xy):
     perp_v = np.array([-dir_v[1], dir_v[0]], dtype=float)
 
     candidates = []
-    for alpha in np.linspace(0.10, 0.90, 17):
+    for alpha in np.linspace(0, 1, 17):
         cx = Ux + alpha * (Dx - Ux)
         cy = Uy + alpha * (Dy - Uy)
 
@@ -153,12 +154,7 @@ def find_two_leg_seeds_between_U_and_D(skeleton, U_xy, D_xy):
     _, _, left_seed, right_seed = candidates[0]
     return left_seed, right_seed
 
-
-"""
-===========================================================
-4. 두 seed 기준 geodesic partition
-===========================================================
-"""
+# 두 점을 이용해서 전체 혈관 벼대를 왼쪽과 오른쪽으로 구분해주는 함수
 def build_side_masks_from_two_seeds(cut_skeleton, left_seed, right_seed):
     left_dist, _ = geodesic_distances_from_seed(cut_skeleton, left_seed)
     right_dist, _ = geodesic_distances_from_seed(cut_skeleton, right_seed)
@@ -195,11 +191,7 @@ def build_side_masks_from_two_seeds(cut_skeleton, left_seed, right_seed):
     return left_mask, right_mask
 
 
-"""
-===========================================================
-5. 각 side mask 내부에서 leg path 추적
-===========================================================
-"""
+# 혈관의 끝점과 apex 사이의 경로를 자르는 함수 (측정에 필요한 부분만 남기는 함수)
 def choose_best_endpoint_for_leg(side_mask, seed_pt, D_xy, dir_v):
     dist, parent = geodesic_distances_from_seed(side_mask, seed_pt)
     if len(dist) == 0:
@@ -292,11 +284,6 @@ def extract_two_leg_paths(skeleton, apex_cut_pt, U_xy, D_xy, branch_pt=None):
     return best_result
 
 
-"""
-===========================================================
-6. 순차적 스켈레톤 추적 및 Trim
-===========================================================
-"""
 def trim_path_for_measurement(path, U_xy, D_xy, branch_pt=None, min_keep=5, pixel_margin=0.5):
     vec_axis = np.array([D_xy[0] - U_xy[0], D_xy[1] - U_xy[1]], dtype=float)
     norm = np.linalg.norm(vec_axis)
@@ -331,11 +318,6 @@ def trim_path_for_measurement(path, U_xy, D_xy, branch_pt=None, min_keep=5, pixe
     return trimmed, trimmed[0], trimmed[-1], dir_v
 
 
-"""
-===========================================================
-7. stable max diameter
-===========================================================
-"""
 def get_stable_max_diameter(trimmed_path, dist_map, smooth_k=5, top_ratio=0.15, min_plateau_len=3):
     if len(trimmed_path) == 0:
         return None

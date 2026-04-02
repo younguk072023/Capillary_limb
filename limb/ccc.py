@@ -1,3 +1,6 @@
+'''
+알고리즘 분석 코드
+'''
 import os
 import cv2
 import pandas as pd
