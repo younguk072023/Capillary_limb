@@ -1,4 +1,4 @@
-## Repository Structure
+## Project Structure
 
 ```text
 .
