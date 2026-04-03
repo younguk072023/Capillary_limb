@@ -11,5 +11,3 @@
 ├── .gitignore               
 └── README.md                # 프로젝트 가이드 및 설명서    
 
-```bash
-git clone
