@@ -1,13 +1,15 @@
+'''
+수동 라벨 알고리즘 작성
+전문가 사용자가 이미지에서 혈관의 직경을 측정하기 위해 4개의 점을 찍는 과정
+'''
 import os
 import cv2
 import csv
 import math
 import numpy as np
 
-# ================= 설정 영역 =================
 IMAGE_DIR = r"C:\Users\park_younguk\Desktop\limb_label"  
 CSV_FILENAME = os.path.join(IMAGE_DIR, "manual_measurement_results.csv")
-# =============================================
 
 current_points = []
 img_display = None
@@ -17,12 +19,11 @@ image_files = []
 current_img_index = 0
 
 def read_image_unicode(image_path):
-    """한글 경로 포함 이미지 읽기"""
     img_array = np.fromfile(image_path, np.uint8)
     return cv2.imdecode(img_array, cv2.IMREAD_COLOR)
 
 def calculate_distance(p1, p2):
-    """두 점 사이 거리 계산"""
+    #두 점 사이의 유클리드 거리 공식으로 계산
     return math.sqrt((p2[0] - p1[0])**2 + (p2[1] - p1[1])**2)
 
 def save_to_csv():
@@ -56,7 +57,7 @@ def draw_overlay():
     status_text = f"[{current_img_index + 1}/{total_imgs}] {current_name}"
     cv2.putText(img_display, status_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
     
-    # 1. Arterial (A) - 빨간색
+    # Arterial  빨간색
     if len(current_points) >= 1: cv2.circle(img_display, current_points[0], 2, (0, 0, 255), -1)
     if len(current_points) >= 2:
         cv2.circle(img_display, current_points[1], 2, (0, 0, 255), -1)
@@ -64,7 +65,7 @@ def draw_overlay():
         dist_a = calculate_distance(current_points[0], current_points[1])
         cv2.putText(img_display, f"A (Left): {dist_a:.2f}px", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
-    # 2. Venous (V) - 파란색
+    # Venous 파란색
     if len(current_points) >= 3: cv2.circle(img_display, current_points[2], 2, (255, 0, 0), -1)
     if len(current_points) >= 4:
         cv2.circle(img_display, current_points[3], 2, (255, 0, 0), -1)
@@ -83,7 +84,7 @@ def mouse_callback(event, x, y, flags, param):
     if event == cv2.EVENT_LBUTTONDOWN and len(current_points) < 4:
         current_points.append((x, y))
         draw_overlay()
-    # 우클릭: 마지막 점 지우기 (Undo)
+    # 우클릭: 마지막 점 지우기
     elif event == cv2.EVENT_RBUTTONDOWN and len(current_points) > 0:
         current_points.pop()
         draw_overlay()
@@ -101,7 +102,7 @@ def load_existing_csv():
                         pts = [(int(float(row[1])), int(float(row[2]))), (int(float(row[3])), int(float(row[4]))),
                                (int(float(row[6])), int(float(row[7]))), (int(float(row[8])), int(float(row[9])))]
                         results_dict[img_name] = pts
-            print(f"📄 기존 데이터 {len(results_dict)}건 로드 완료.")
+            print(f"기존 데이터 {len(results_dict)}건 로드 완료.")
         except Exception as e:
             print(f"로드 중 오류 발생: {e}")
 
@@ -109,12 +110,12 @@ def main():
     global img_display, img_clean, current_points, image_files, current_img_index
     
     if not os.path.exists(IMAGE_DIR):
-        print(f"❌ 폴더 없음: {IMAGE_DIR}")
+        print(f"폴더 없음: {IMAGE_DIR}")
         return
         
     image_files = [f for f in os.listdir(IMAGE_DIR) if f.lower().endswith('.png')]
     if not image_files:
-        print("❌ 이미지가 없습니다.")
+        print("이미지가 없습니다.")
         return
         
     load_existing_csv()
@@ -150,7 +151,7 @@ def main():
                     current_img_index += 1
                     break
                 else:
-                    print("⚠️ 4개를 찍어야 저장 가능합니다.")
+                    print("4개를 찍어야 저장 가능합니다.")
             
             # 이전으로 (b)
             elif key == ord('b') and current_img_index > 0:
@@ -175,7 +176,7 @@ def main():
                 return
 
     cv2.destroyAllWindows()
-    print(f"🎉 작업 완료! 결과: {CSV_FILENAME}")
+    print(f"작업 완료! 결과: {CSV_FILENAME}")
 
 if __name__ == "__main__":
     main()
