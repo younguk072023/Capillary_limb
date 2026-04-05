@@ -15,21 +15,21 @@ VISUAL_DIR = os.path.join(IMAGE_DIR, "algo_visual_check")
 # =============================================
 
 def main():
-    print("🚀 [좌우 고정 모드] 알고리즘 자동 측정을 시작합니다...")
+    print("[좌우 고정 모드] 알고리즘 자동 측정을 시작합니다...")
     
     if not os.path.exists(VISUAL_DIR):
         os.makedirs(VISUAL_DIR)
-        print(f"📁 시각화 폴더 생성 완료: {VISUAL_DIR}")
+        print(f"시각화 폴더 생성 완료: {VISUAL_DIR}")
 
     if not os.path.exists(KEYPOINT_CSV):
-        print(f"❌ 키포인트 CSV 파일이 없습니다: {KEYPOINT_CSV}")
+        print(f"키포인트 CSV 파일이 없습니다: {KEYPOINT_CSV}")
         return
     df_keypoints = pd.read_csv(KEYPOINT_CSV)
 
     image_files = sorted([f for f in os.listdir(IMAGE_DIR) if f.lower().endswith((".png", ".jpg", ".tif"))])
     
     if not image_files:
-        print(f"❌ 이미지 파일이 없습니다: {IMAGE_DIR}")
+        print(f"이미지 파일이 없습니다: {IMAGE_DIR}")
         return
 
     results_list = []
@@ -76,10 +76,10 @@ def main():
             cv2.putText(img_vis, f"Right: {right_leg['max_d']:.1f}px", (vx1, vy1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
             
             row["Status"] = "Success"
-            print(f"[{idx+1}/{len(image_files)}] ✅ {img_name} 좌우 분석 완료")
+            print(f"[{idx+1}/{len(image_files)}] {img_name} 좌우 분석 완료")
         else:
             cv2.putText(img_vis, "FAILED", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-            print(f"[{idx+1}/{len(image_files)}] ❌ {img_name} 실패")
+            print(f"[{idx+1}/{len(image_files)}]  {img_name} 실패")
 
         # 시각화 이미지 저장
         result_name = f"check_{img_name}"
@@ -90,7 +90,7 @@ def main():
 
     pd.DataFrame(results_list).to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
     print("-" * 50)
-    print(f"🎉 좌우 기준 통합 완료! 시각화 확인: {VISUAL_DIR}")
+    print(f" 좌우 기준 통합 완료! 시각화 확인: {VISUAL_DIR}")
 
 if __name__ == "__main__":
     main()
