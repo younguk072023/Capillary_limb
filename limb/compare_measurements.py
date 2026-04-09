@@ -16,11 +16,11 @@ def main():
         print("CSV 파일을 찾을 수 없습니다. 경로를 확인하세요.")
         return
 
-    # 1. 데이터 로드
+    # 데이터 로드
     df_man = pd.read_csv(MANUAL_CSV)
     df_alg = pd.read_csv(ALGO_CSV)
 
-    # 2. 전처리 (확장자 제거 및 필터링)
+    # 전처리 (확장자 제거 및 필터링)
     df_man['pure_name'] = df_man['Filename'].apply(lambda x: os.path.splitext(str(x))[0])
     df_alg['pure_name'] = df_alg['Filename'].apply(lambda x: os.path.splitext(str(x))[0])
     df_alg['Status'] = df_alg['Status'].str.strip()
