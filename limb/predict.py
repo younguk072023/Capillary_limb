@@ -8,7 +8,7 @@ import numpy as np
 from analyzer import analyze_single_image
 
 # ================= 설정 영역 =================
-IMAGE_DIR = r"C:\Users\park_younguk\Desktop\limb_mtl"  
+IMAGE_DIR = r"C:\Users\park_younguk\Desktop\analysis\total\label"  
 KEYPOINT_CSV = r"capillary_keypoint_final.csv"          
 OUTPUT_CSV = os.path.join(IMAGE_DIR, "algo_gt_measurement_unified.csv")
 VISUAL_DIR = os.path.join(IMAGE_DIR, "algo_visual_check")

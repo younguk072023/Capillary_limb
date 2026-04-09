@@ -5,7 +5,6 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 import cv2
 
-# 영욱님의 analyzer 모듈 임포트
 from analyzer import analyze_single_image
 
 def save_viz_image_for_qc(image_name, result, output_folder):
