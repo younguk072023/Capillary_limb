@@ -7,7 +7,7 @@ import os
 
 
 MANUAL_CSV = r"C:\Users\park_younguk\Desktop\analysis\total\image/manual_measurement_results.csv"
-ALGO_CSV = r"C:\Users\park_younguk\Desktop\analysis\total\label\algo_gt_measurement_unified.csv"
+ALGO_CSV = r"C:\Users\park_younguk\Desktop\analysis\label\tortuous\algo_gt_measurement_unified.csv"
 
 def main():
     print("🚀 [Publication Style] 데이터 병합 및 신뢰도 분석 시작...")
