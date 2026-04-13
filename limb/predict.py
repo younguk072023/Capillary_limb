@@ -8,9 +8,9 @@ import numpy as np
 from analyzer import analyze_single_image
 
 # ================= 설정 영역 =================
-IMAGE_DIR = r"C:\Users\park_younguk\Desktop\analysis\label\u"  
-KEYPOINT_CSV = r"capillary_keypoint_final.csv"          
-OUTPUT_CSV = os.path.join(IMAGE_DIR, "algo_gt_measurement_unified.csv")
+IMAGE_DIR = r"C:\Users\park_younguk\Desktop\analysis\effi_mask"  
+KEYPOINT_CSV = r"C:\Users\park_younguk\Desktop\analysis\predicted_coordinates.csv"       
+OUTPUT_CSV = os.path.join(IMAGE_DIR, "final_mtl_algo_measurement.csv")
 VISUAL_DIR = os.path.join(IMAGE_DIR, "algo_visual_check")
 # =============================================
 
