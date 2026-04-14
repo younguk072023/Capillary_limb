@@ -6,18 +6,18 @@ from scipy.stats import pearsonr
 import pingouin as pg  # ICC 계산을 위한 라이브러리
 import os
 
-# 1. 경로 설정
+# 경로 설정
 MANUAL_CSV = r"C:\Users\park_younguk\Desktop\analysis\total\image\manual_measurement_results.csv"
 ALGO_CSV = r"C:\Users\park_younguk\Desktop\analysis\total\label\algo_gt_measurement_unified.csv"
 
 def main():
-    print("🚀 [Publication Style] 통합 신뢰도 분석 (Pearson, Bland-Altman, ICC) 시작...")
+    print("[Publication Style] 통합 신뢰도 분석 (Pearson, Bland-Altman, ICC) 시작...")
     
     if not os.path.exists(MANUAL_CSV) or not os.path.exists(ALGO_CSV):
         print("CSV 파일을 찾을 수 없습니다. 경로를 확인하세요.")
         return
 
-    # 2. 데이터 로드 및 병합
+    # 데이터 로드 및 병합
     df_man = pd.read_csv(MANUAL_CSV)
     df_alg = pd.read_csv(ALGO_CSV)
 
@@ -36,7 +36,7 @@ def main():
     man_vals = np.concatenate([df['Manual_Arterial_Diameter(px)'].values, df['Manual_Venous_Diameter(px)'].values])
     alg_vals = np.concatenate([df['Algo_Arterial_Diameter(px)'].values, df['Algo_Venous_Diameter(px)'].values])
 
-    # 3. 통계 계산 - Pearson & Bland-Altman
+    # 통계 계산 - Pearson & Bland-Altman
     r_val, p_val = pearsonr(man_vals, alg_vals)
     diff = alg_vals - man_vals
     avg = (alg_vals + man_vals) / 2
@@ -45,7 +45,7 @@ def main():
     upper_loa = bias + 1.96 * sd
     lower_loa = bias - 1.96 * sd
 
-    # 4. 통계 계산 - ICC (3,1)
+    # 통계 계산 - ICC (3,1)
     # ICC 계산을 위한 데이터 재구성 (Long-format)
     icc_data = pd.DataFrame({
         'targets': list(range(len(man_vals))) * 2,
@@ -56,7 +56,7 @@ def main():
     icc_31 = icc_results.set_index('Type').loc['ICC3', 'ICC']
     icc_ci = icc_results.set_index('Type').loc['ICC3', 'CI95%']
 
-    # 5. 시각화 설정 (Times New Roman 적용)
+    # 시각화 설정 (Times New Roman 적용)
     plt.rcParams['font.family'] = 'serif'
     plt.rcParams['font.serif'] = ['Times New Roman'] + plt.rcParams['font.serif']
     sns.set_style("white")
@@ -64,7 +64,7 @@ def main():
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5.5))
     marker_style = dict(color='royalblue', alpha=0.6, s=40, edgecolors='white', linewidth=0.5)
 
-    # --- Left: Pearson Correlation Plot ---
+    # Pearson Correlation Plot 
     ax1.scatter(man_vals, alg_vals, **marker_style, label='Data points')
     
     # Identity & Regression Line
@@ -82,14 +82,14 @@ def main():
     ax1.set_xlim(line_min, line_max); ax1.set_ylim(line_min, line_max)
     ax1.grid(True, linestyle=':', alpha=0.4)
 
-    # --- Right: Bland-Altman Plot ---
+    # Bland-Altman Plot 
     ax2.scatter(avg, diff, **marker_style)
     ax2.axhline(bias, color='darkred', linestyle='-', linewidth=2)
     ax2.axhline(upper_loa, color='black', linestyle='--', linewidth=1.2)
     ax2.axhline(lower_loa, color='black', linestyle='--', linewidth=1.2)
     ax2.axhline(0, color='gray', linestyle=':', linewidth=0.8)
 
-    # 텍스트 주석 (오른쪽 끝에 배치)
+    # 텍스트 주석 
     x_pos = ax2.get_xlim()[1] * 0.98
     ax2.text(x_pos, bias, f'Bias: {bias:.2f}', va='bottom', ha='right', color='darkred', fontweight='bold')
     ax2.text(x_pos, upper_loa, f'+1.96 SD: {upper_loa:.2f}', va='bottom', ha='right', fontsize=9)
@@ -102,7 +102,7 @@ def main():
 
     plt.tight_layout()
     
-    # 6. 결과 출력 및 저장
+    # 결과 출력 및 저장
     save_name = "Final_Reliability_Analysis.png"
     plt.savefig(save_name, dpi=400, bbox_inches='tight')
     plt.show()
