@@ -71,7 +71,7 @@ def main():
                 sorted_legs_by_size = sorted(leg_results, key=lambda x: x["max_d"])
                 
                 arterial_leg = sorted_legs_by_size[0] # 더 가는 혈관
-                venous_leg = sorted_legs_by_size[1]   # 더 굵은 혈관
+                venous_leg = sorted_legs_by_size[1]   # 더 굵은 혈관\
 
                 # --- 1. 세동맥 (빨간색) 계산 및 그리기 ---
                 ax1, ay1 = int(round(arterial_leg["max_x"] + arterial_leg["local_perp_v"][0] * arterial_leg["max_d_pos"])), \
@@ -88,7 +88,7 @@ def main():
                            int(round(venous_leg["max_y"] + venous_leg["local_perp_v"][1] * venous_leg["max_d_pos"]))
                 vx2, vy2 = int(round(venous_leg["max_x"] - venous_leg["local_perp_v"][0] * venous_leg["max_d_neg"])), \
                            int(round(venous_leg["max_y"] - venous_leg["local_perp_v"][1] * venous_leg["max_d_neg"]))
-                
+                ''
                 row.update({"V_x1": vx1, "V_y1": vy1, "V_x2": vx2, "V_y2": vy2, "Algo_Venous_Diameter(px)": round(venous_leg["max_d"], 2)})
                 cv2.line(img_vis, (vx1, vy1), (vx2, vy2), (255, 0, 0), 2)
                 cv2.putText(img_vis, f"V: {venous_leg['max_d']:.1f}px", (vx1, vy1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)

@@ -128,30 +128,24 @@ def find_two_leg_seeds_between_U_and_D(skeleton, U_xy, D_xy):
     if norm < 1e-6:
         return None
 
+    # U->D 방향
     dir_v = axis_v / norm
+
+    # apex width line 방향 = U->D에 수직
     perp_v = np.array([-dir_v[1], dir_v[0]], dtype=float)
 
-    candidates = []
-    for alpha in np.linspace(0, 1, 17):
-        cx = Ux + alpha * (Dx - Ux)
-        cy = Uy + alpha * (Dy - Uy)
+    # 네 방식: D점 한 군데에서만 좌/우 seed 찾기
+    left_seed, right_seed, score = find_left_right_seed_on_crossline(
+        skeleton=skeleton,
+        center_xy=(Dx, Dy),          # D점 기준
+        perp_v=perp_v,               # apex width line 방향
+        img_shape=skeleton.shape,
+        min_sep=3
+    )
 
-        left_seed, right_seed, score = find_left_right_seed_on_crossline(
-            skeleton=skeleton,
-            center_xy=(cx, cy),
-            perp_v=perp_v,
-            img_shape=skeleton.shape,
-            min_sep=3
-        )
-
-        if left_seed is not None and right_seed is not None:
-            candidates.append((score, alpha, left_seed, right_seed))
-
-    if len(candidates) == 0:
+    if left_seed is None or right_seed is None:
         return None
 
-    candidates.sort(key=lambda x: (x[0], -abs(x[1] - 0.5)), reverse=True)
-    _, _, left_seed, right_seed = candidates[0]
     return left_seed, right_seed
 
 # 두 점을 이용해서 전체 혈관 벼대를 왼쪽과 오른쪽으로 구분해주는 함수

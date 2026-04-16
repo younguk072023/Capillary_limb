@@ -11,9 +11,12 @@ from core_algorithm import (
 )
 
 '''
-다리의 각 지점에서 두께를 잴 준비
+한 개의 limb path가 주어졌을 때,
+그 path를 따라가며 각 지점의 두께를 재고
+그중에서 가장 안정적인 최대 직경을 뽑는 함수
 '''
-def get_stable_max_diameter_raycast(trimmed_path, binary_image, dir_v, smooth_k=5, top_ratio=0, min_plateau_len=0):
+
+def get_stable_max_diameter_raycast(trimmed_path, binary_image, dir_v, smooth_k=0, top_ratio=0, min_plateau_len=3):
     if len(trimmed_path) == 0:
         return None
 
@@ -23,8 +26,8 @@ def get_stable_max_diameter_raycast(trimmed_path, binary_image, dir_v, smooth_k=
 
     widths_raw = np.zeros(len(trimmed_path))    #각 지점의 두께를 적는 배열
     pvs = []    #각 지점에서 자를 어느 각도로 자를지 저장하는 배열 
-    d_pos_list = []
-    d_neg_list = []
+    d_pos_list = [] #양쪽 거리
+    d_neg_list = [] 
 
     for i in range(len(trimmed_path)):  # 각 지점마다 for문 돌려 길이 확인
         
@@ -35,6 +38,7 @@ def get_stable_max_diameter_raycast(trimmed_path, binary_image, dir_v, smooth_k=
         dy_loc = ys[t_end] - ys[t_start]
         norm_loc = np.hypot(dx_loc, dy_loc)
         
+        #pv는 직경을 젤 방향
         if norm_loc < 1e-6:
             pv = np.array([-dir_v[1], dir_v[0]], dtype=float)
         else:
@@ -96,12 +100,13 @@ def get_stable_max_diameter_raycast(trimmed_path, binary_image, dir_v, smooth_k=
             current = [i]
     groups.append(current)
 
-    valid_groups = [g for g in groups if len(g) >= min_plateau_len] #혈관의 최대 직경 구간이라면 최소한 3픽셀 정도는 꾸준히 굵어야 진짜 혈관 직겨으로 
+    valid_groups = [g for g in groups if len(g) >= min_plateau_len] #혈관의 최대 직경 구간이라면 최소한 3픽셀 
+                                                                    #정도는 꾸준히 굵어야 진짜 혈관 직경으로 
     if len(valid_groups) == 0:
         valid_groups = groups
 
     best_group = max(valid_groups, key=lambda g: (len(g), np.mean(widths_s[g])))
-    center_idx = best_group[len(best_group) // 2]
+    center_idx = best_group[len(best_group) // 2]   #대표위치 좌표로 씀.
     stable_width = float(np.mean(widths_s[best_group]))
 
     return {
@@ -121,26 +126,30 @@ def get_stable_max_diameter_raycast(trimmed_path, binary_image, dir_v, smooth_k=
 2. 좌표 매핑
 3. 구조 분리
 4. 측정 및 분리
+
+
 '''
 def analyze_single_image(image_path, df_keypoints):
     img = read_image_unicode(image_path)
     if img is None:
         return {"ok": False, "reason": f"이미지를 읽지 못했습니다: {image_path}"}
 
+    #분할된 혈관 내에 있어서 각 지점의 두께를 측정하기 위해 범위 구간 정해둠.
     binary_image = img > 127
-    skeleton = skeletonize(binary_image)
+    skeleton = skeletonize(binary_image)    #스켈레톤화
 
     labeled_full = label(skeleton)
     if labeled_full.max() == 0:
         return {"ok": False, "reason": "스켈레톤이 없습니다."}
     
     # 노이즈 제거 -> 제일 큰 뼈대 하나만 남김
-    counts = np.bincount(labeled_full.flat)
-    main_label = np.argmax(counts[1:]) + 1
+    counts = np.bincount(labeled_full.flat) #라벨 번호가 몇 픽셀씩 있는지 세는 코드
+    main_label = np.argmax(counts[1:]) + 1  #counts는 배경이라서 제외하고
     skeleton = (labeled_full == main_label)
 
-    search_name = os.path.splitext(os.path.basename(image_path))[0]
-    row = df_keypoints[df_keypoints["filename"].apply(lambda x: os.path.splitext(str(x))[0]) == search_name]
+    #어느 혈관을 어떤 방향으로 어디서부터 볼지를 정하는 단계.
+    search_name = os.path.splitext(os.path.basename(image_path))[0] #전체 경로에서 파일명만 뽑음
+    row = df_keypoints[df_keypoints["filename"].apply(lambda x: os.path.splitext(str(x))[0]) == search_name]    #확장자 제거함.
     if row.empty:
         return {"ok": False, "reason": f"{search_name} 에 해당하는 CSV 행이 없습니다."}
 
@@ -158,13 +167,13 @@ def analyze_single_image(image_path, df_keypoints):
     #분석 구간과 시작점과 끝점을 확정하는 단계 
     # -> MTL에서 학습해서 나온 결과 U,D좌표를 실제 스켈레톤 위로 스냅핑하는 과정과, U-D 사이의 구간에서 양쪽 다리의 시작점을 찾는 과정.
     apex_cut_pt = snap_xy_to_skeleton(skeleton, U_xy)
+    
     used_branch_pt = find_bottom_of_inner_hole(binary_image, D_xy, dir_v)
 
     # 혈관 구조 쪼개버림
     split_result = extract_two_leg_paths(skeleton, apex_cut_pt, U_xy, D_xy, used_branch_pt)
     if split_result is None:
         return {"ok": False, "reason": "두 다리 path 추출에 실패했습니다."}
-
     used_branch_pt = split_result["branch_pt"]
     cut_skeleton = split_result["cut_skeleton"]
     raw_paths = split_result["paths"]
@@ -182,6 +191,10 @@ def analyze_single_image(image_path, df_keypoints):
 
     leg_results = []
 
+    '''
+    path는 원래 전체 다리
+    trimmed_path는 실제 측정용 다듬은 다리 
+    '''
     # 각 다리의 지점마다 두께 측정
     for idx, path in enumerate(raw_paths):
         if len(path) < 2:
@@ -198,8 +211,8 @@ def analyze_single_image(image_path, df_keypoints):
             trimmed_path,
             binary_image,
             dir_v,
-            smooth_k=3, # 픽셀 계단 형상을 극복하고 정확한 수직 각도를 잡기 위함
-            top_ratio=0.15, # 단일 시점이 아닌 상위 후보군을 추출하여 통계적 신뢰도를 높이기 위함.
+            smooth_k=1, # 픽셀 계단 형상을 극복하고 정확한 수직 각도를 잡기 위함
+            top_ratio=0, # 단일 시점이 아닌 상위 후보군을 추출하여 통계적 신뢰도를 높이기 위함.
             min_plateau_len=3,  #일시적인 수치 튐을 제거하고, 연속적인 혈관 구조를 가진 진짜 몸톰 찾기 위함.
         )
         if stable_res is None:
@@ -209,7 +222,7 @@ def analyze_single_image(image_path, df_keypoints):
         
         leg_results.append({
             "id": idx,
-            "max_d": float(stable_res["max_d"]),
+            "max_d": float(stable_res["max_d"]),    #최대 직경
             "max_x": int(stable_res["max_x"]),
             "max_y": int(stable_res["max_y"]),
             "max_d_pos": stable_res["d_pos"],    
