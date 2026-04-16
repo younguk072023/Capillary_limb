@@ -8,7 +8,9 @@ from core_algorithm import (
     find_bottom_of_inner_hole,
     extract_two_leg_paths,
     trim_path_for_measurement,
-    build_vessel_masks_from_side_skeletons
+    build_vessel_masks_from_side_skeletons,
+    debug_crossline_at_center,
+    build_cut_skeleton,
 )
 
 '''
@@ -191,10 +193,43 @@ def analyze_single_image(image_path, df_keypoints):
     
     used_branch_pt = find_bottom_of_inner_hole(binary_image, D_xy, dir_v)
 
+    perp_v = np.array([-dir_v[1], dir_v[0]], dtype=float)
+
+    
+    preview_cut_skeleton, _ = build_cut_skeleton(
+        skeleton,
+        apex_cut_pt,
+        used_branch_pt,
+        dilate_size=1
+    )
+
+    debug_dline = debug_crossline_at_center(
+        skeleton=preview_cut_skeleton,
+        center_xy=D_xy,
+        perp_v=perp_v,
+        img_shape=preview_cut_skeleton.shape,
+        min_sep=1,
+        band_height=20
+    )
+
     # 혈관 구조 쪼개버림
     split_result = extract_two_leg_paths(skeleton, apex_cut_pt, U_xy, D_xy, used_branch_pt)
     if split_result is None:
-        return {"ok": False, "reason": "두 다리 path 추출에 실패했습니다."}
+        return {
+            "ok": False,
+            "reason": "두 다리 path 추출에 실패했습니다.",
+            "img": img,
+            "binary_image": binary_image,
+            "skeleton": skeleton,
+            "U_xy": U_xy,
+            "D_xy": D_xy,
+            "dir_v": dir_v,
+            "apex_cut_pt": apex_cut_pt,
+            "used_branch_pt": used_branch_pt,
+            "debug_dline": debug_dline,
+            "search_name": search_name,
+        }
+    
     used_branch_pt = split_result["branch_pt"]
     cut_skeleton = split_result["cut_skeleton"]
     raw_paths = split_result["paths"]

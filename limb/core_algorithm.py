@@ -63,7 +63,7 @@ def find_bottom_of_inner_hole(binary_image, D_xy, dir_v):
     return true_bottom_pt
 
 # skeleton의 혈관을 따라가서 양쪽 다리의 가장 큰 길이 구하는 함수
-def sample_perp_line_points(center_xy, perp_v, half_len=24, num=121):
+def sample_perp_line_points(center_xy, perp_v, half_len=50, num=121):
     cx, cy = center_xy
     ts = np.linspace(-half_len, half_len, num)
     out = []
@@ -77,46 +77,83 @@ def sample_perp_line_points(center_xy, perp_v, half_len=24, num=121):
     return out
 
 #왼쪽 다리와 오른쪽 다리를 처음으로 구분해주는 seed찾는 함수
-def find_left_right_seed_on_crossline(skeleton, center_xy, perp_v, img_shape, min_sep=3):
+def find_left_right_seed_on_crossline(skeleton, center_xy, perp_v, img_shape, min_sep=1, band_height=20):
     h, w = img_shape
-    pts = sample_perp_line_points(center_xy, perp_v, half_len=28, num=141)
+
+    ys, xs = np.where(skeleton)
+    if len(xs) == 0:
+        return None, None, None
+
+    perp_v = np.asarray(perp_v, dtype=float)
+    perp_v = perp_v / (np.linalg.norm(perp_v) + 1e-12)
+
+    # perp_v에 수직인 방향 = D line 아래쪽 방향
+    dir_v = np.array([perp_v[1], -perp_v[0]], dtype=float)
+
+    C = np.array([center_xy[0], center_xy[1]], dtype=float)
+    P = np.stack([xs, ys], axis=1).astype(float)   # (x, y)
+
+    rel = P - C[None, :]
+    t = rel @ perp_v   # line 방향 좌표 (좌/우 구분용)
+    n = rel @ dir_v    # line 아래쪽 거리
+
+    # 빨간선 바로 아래쪽 band 안만 사용
+    valid = (n >= 0) & (n <= band_height)
+
+    left_idx = np.where(valid & (t < 0))[0]
+    right_idx = np.where(valid & (t > 0))[0]
+
+    if len(left_idx) == 0 or len(right_idx) == 0:
+        return None, None, None
+
+    # 각 쪽에서 빨간선에 가장 가까운 점 우선, 같으면 더 바깥쪽 점 우선
+    left_order = np.lexsort((-np.abs(t[left_idx]), n[left_idx]))
+    right_order = np.lexsort((-np.abs(t[right_idx]), n[right_idx]))
+
+    li = left_idx[left_order[0]]
+    ri = right_idx[right_order[0]]
+
+    left_seed = (int(P[li, 1]), int(P[li, 0]))    # (y, x)
+    right_seed = (int(P[ri, 1]), int(P[ri, 0]))   # (y, x)
+
+    score = float(abs(t[li] - t[ri]))
+    if score < min_sep:
+        return None, None, None
+
+    return left_seed, right_seed, score
+
+def debug_crossline_at_center(skeleton, center_xy, perp_v, img_shape, min_sep=1, band_height=20):
+    h, w = img_shape
+
+    # 빨간선 자체 샘플(화면용 hit)
+    half_len = int(np.ceil(np.hypot(h, w)))
+    num = max(141, 2 * half_len + 1)
+    pts = sample_perp_line_points(center_xy, perp_v, half_len=half_len, num=num)
 
     hits = []
     for t, y, x in pts:
         if 0 <= y < h and 0 <= x < w and skeleton[y, x]:
             hits.append((t, y, x))
 
-    if len(hits) < 2:
-        return None, None, None
+    # 실제 seed는 near-line 방식으로 계산
+    left_seed, right_seed, score = find_left_right_seed_on_crossline(
+        skeleton=skeleton,
+        center_xy=center_xy,
+        perp_v=perp_v,
+        img_shape=img_shape,
+        min_sep=min_sep,
+        band_height=band_height
+    )
 
-    clusters = []
-    current = [hits[0]]
-    for item in hits[1:]:
-        prev = current[-1]
-        if abs(item[0] - prev[0]) <= 1.5:
-            current.append(item)
-        else:
-            clusters.append(current)
-            current = [item]
-    clusters.append(current)
-
-    if len(clusters) < 2:
-        return None, None, None
-
-    left_cluster = clusters[-1]
-    right_cluster = clusters[0]
-
-    left_seed = left_cluster[len(left_cluster) // 2][1:]
-    right_seed = right_cluster[len(right_cluster) // 2][1:]
-
-    left_t = left_cluster[len(left_cluster) // 2][0]
-    right_t = right_cluster[len(right_cluster) // 2][0]
-
-    if abs(right_t - left_t) < min_sep:
-        return None, None, None
-
-    score = abs(right_t - left_t)
-    return left_seed, right_seed, score
+    return {
+        "center_xy": center_xy,
+        "pts": pts,
+        "hits": hits,
+        "clusters": [],
+        "left_seed": left_seed,
+        "right_seed": right_seed,
+        "score": score,
+    }
 
 # apex width을 찾아주는 함수
 def find_two_leg_seeds_between_U_and_D(skeleton, U_xy, D_xy):
@@ -139,7 +176,7 @@ def find_two_leg_seeds_between_U_and_D(skeleton, U_xy, D_xy):
         skeleton=skeleton,
         center_xy=(Dx, Dy),          # D점 기준
         perp_v=perp_v,               # apex width line 방향
-        img_shape=skeleton.shape,\
+        img_shape=skeleton.shape,
         min_sep=3
     )
 
