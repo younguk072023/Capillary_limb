@@ -139,7 +139,7 @@ def find_two_leg_seeds_between_U_and_D(skeleton, U_xy, D_xy):
         skeleton=skeleton,
         center_xy=(Dx, Dy),          # D점 기준
         perp_v=perp_v,               # apex width line 방향
-        img_shape=skeleton.shape,
+        img_shape=skeleton.shape,\
         min_sep=3
     )
 
@@ -185,6 +185,22 @@ def build_side_masks_from_two_seeds(cut_skeleton, left_seed, right_seed):
     return left_mask, right_mask
 
 
+from scipy.ndimage import distance_transform_edt
+
+def build_vessel_masks_from_side_skeletons(binary_image, left_mask, right_mask):
+    if left_mask is None or right_mask is None:
+        return None, None
+
+    vessel = binary_image.astype(bool)
+
+    # 각 픽셀이 왼쪽 skeleton / 오른쪽 skeleton 중 어디에 더 가까운지 계산
+    left_dist = distance_transform_edt(~left_mask)
+    right_dist = distance_transform_edt(~right_mask)
+
+    left_vessel_mask = vessel & (left_dist <= right_dist)
+    right_vessel_mask = vessel & (right_dist < left_dist)
+
+    return left_vessel_mask, right_vessel_mask
 # 혈관의 끝점과 apex 사이의 경로를 자르는 함수 (측정에 필요한 부분만 남기는 함수)
 def choose_best_endpoint_for_leg(side_mask, seed_pt, D_xy, dir_v):
     dist, parent = geodesic_distances_from_seed(side_mask, seed_pt)

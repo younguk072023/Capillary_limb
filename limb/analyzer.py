@@ -7,7 +7,8 @@ from utils import read_image_unicode, snap_xy_to_skeleton, smooth_1d
 from core_algorithm import (
     find_bottom_of_inner_hole,
     extract_two_leg_paths,
-    trim_path_for_measurement
+    trim_path_for_measurement,
+    build_vessel_masks_from_side_skeletons
 )
 
 '''
@@ -16,18 +17,23 @@ from core_algorithm import (
 그중에서 가장 안정적인 최대 직경을 뽑는 함수
 '''
 
-def get_stable_max_diameter_raycast(trimmed_path, binary_image, dir_v, smooth_k=0, top_ratio=0, min_plateau_len=3):
+def get_stable_max_diameter_raycast(trimmed_path, binary_image, dir_v, D_xy,
+                                    smooth_k=5, top_ratio=0, min_plateau_len=0):
     if len(trimmed_path) == 0:
         return None
 
     ys = np.array([p[0] for p in trimmed_path])
     xs = np.array([p[1] for p in trimmed_path])
     h, w = binary_image.shape
+    
+    D_vec = np.array([D_xy[0], D_xy[1]], dtype=float)  
 
     widths_raw = np.zeros(len(trimmed_path))    #각 지점의 두께를 적는 배열
     pvs = []    #각 지점에서 자를 어느 각도로 자를지 저장하는 배열 
     d_pos_list = [] #양쪽 거리
     d_neg_list = [] 
+
+
 
     for i in range(len(trimmed_path)):  # 각 지점마다 for문 돌려 길이 확인
         
@@ -43,13 +49,21 @@ def get_stable_max_diameter_raycast(trimmed_path, binary_image, dir_v, smooth_k=
             pv = np.array([-dir_v[1], dir_v[0]], dtype=float)
         else:
             pv = np.array([-dy_loc, dx_loc], dtype=float) / norm_loc
+
         
         # 양의 방향으로 limb 직경 측정
         d_pos = 0.0
         for step in range(1, 150):
             ny = int(round(ys[i] + pv[1] * step))
             nx = int(round(xs[i] + pv[0] * step))
-            if ny < 0 or ny >= h or nx < 0 or nx >= w or not binary_image[ny, nx]:
+
+            proj_D_ray = np.dot(np.array([nx, ny], dtype=float) - D_vec, dir_v)
+
+            if (
+                ny < 0 or ny >= h or nx < 0 or nx >= w
+                or proj_D_ray < 0
+                or not binary_image[ny, nx]
+            ):
                 d_pos = np.hypot(nx - xs[i], ny - ys[i])
                 break
         
@@ -58,7 +72,14 @@ def get_stable_max_diameter_raycast(trimmed_path, binary_image, dir_v, smooth_k=
         for step in range(1, 150):
             ny = int(round(ys[i] - pv[1] * step))
             nx = int(round(xs[i] - pv[0] * step))
-            if ny < 0 or ny >= h or nx < 0 or nx >= w or not binary_image[ny, nx]:
+
+            proj_D_ray = np.dot(np.array([nx, ny], dtype=float) - D_vec, dir_v)
+
+            if (
+                ny < 0 or ny >= h or nx < 0 or nx >= w
+                or proj_D_ray < 0
+                or not binary_image[ny, nx]
+            ):
                 d_neg = np.hypot(nx - xs[i], ny - ys[i])
                 break
         
@@ -181,13 +202,18 @@ def analyze_single_image(image_path, df_keypoints):
     right_seed = split_result.get("right_seed", None)
     left_mask = split_result.get("left_mask", None)
     right_mask = split_result.get("right_mask", None)
+    left_vessel_mask, right_vessel_mask = build_vessel_masks_from_side_skeletons(
+    binary_image,
+    left_mask,
+    right_mask
+)
 
     # 시각화, 왼쪽 다리에는 1, 오른쪽 다리에는 2
     labeled_mask = np.zeros_like(binary_image, dtype=np.uint8)
-    if left_mask is not None:
-        labeled_mask[left_mask] = 1
-    if right_mask is not None:
-        labeled_mask[right_mask] = 2
+    if left_vessel_mask is not None:
+        labeled_mask[left_vessel_mask] = 1
+    if right_vessel_mask is not None:
+        labeled_mask[right_vessel_mask] = 2
 
     leg_results = []
 
@@ -207,13 +233,18 @@ def analyze_single_image(image_path, df_keypoints):
             continue
 
         # 두께 측정 부분 
+        measure_mask = left_vessel_mask if idx == 0 else right_vessel_mask
+        if measure_mask is None:
+            continue
+
         stable_res = get_stable_max_diameter_raycast(
             trimmed_path,
-            binary_image,
+            measure_mask,
             dir_v,
-            smooth_k=1, # 픽셀 계단 형상을 극복하고 정확한 수직 각도를 잡기 위함
-            top_ratio=0, # 단일 시점이 아닌 상위 후보군을 추출하여 통계적 신뢰도를 높이기 위함.
-            min_plateau_len=3,  #일시적인 수치 튐을 제거하고, 연속적인 혈관 구조를 가진 진짜 몸톰 찾기 위함.
+            D_xy,
+            smooth_k=3,
+            top_ratio=0.15,
+            min_plateau_len=3,
         )
         if stable_res is None:
             continue
