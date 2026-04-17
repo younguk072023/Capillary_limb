@@ -1,9 +1,9 @@
 import os
 import numpy as np
-from scipy.ndimage import distance_transform_edt
+
 from skimage.measure import label
 from skimage.morphology import skeletonize
-from utils import read_image_unicode, snap_xy_to_skeleton, smooth_1d 
+from utils import read_image_unicode, snap_xy_to_skeleton
 from core_algorithm import (
     find_bottom_of_inner_hole,
     extract_two_leg_paths,
@@ -19,11 +19,12 @@ from core_algorithm import (
 그중에서 가장 안정적인 최대 직경을 뽑는 함수
 '''
 
-def get_stable_max_diameter_raycast(trimmed_path, binary_image, dir_v, D_xy,
-                                    smooth_k=5, top_ratio=0, min_plateau_len=0):
+def get_stable_max_diameter_raycast(trimmed_path, binary_image, dir_v, D_xy):
+    
     if len(trimmed_path) == 0:
         return None
 
+    #path 좌표 정리
     ys = np.array([p[0] for p in trimmed_path])
     xs = np.array([p[1] for p in trimmed_path])
     h, w = binary_image.shape
@@ -31,14 +32,13 @@ def get_stable_max_diameter_raycast(trimmed_path, binary_image, dir_v, D_xy,
     D_vec = np.array([D_xy[0], D_xy[1]], dtype=float)  
 
     widths_raw = np.zeros(len(trimmed_path))    #각 지점의 두께를 적는 배열
-    pvs = []    #각 지점에서 자를 어느 각도로 자를지 저장하는 배열 
+    pvs = []    #각 점에서 직경을 잴때 사용한 수직 방향 벡터
     d_pos_list = [] #양쪽 거리
     d_neg_list = [] 
 
-
-
     for i in range(len(trimmed_path)):  # 각 지점마다 for문 돌려 길이 확인
         
+        #현재 점에서 혈관 방향 추정 코드
         t_start = max(0, i - 3)
         t_end = min(len(trimmed_path) - 1, i + 3)
         
@@ -46,13 +46,12 @@ def get_stable_max_diameter_raycast(trimmed_path, binary_image, dir_v, D_xy,
         dy_loc = ys[t_end] - ys[t_start]
         norm_loc = np.hypot(dx_loc, dy_loc)
         
-        #pv는 직경을 젤 방향
+        #직각 방향 만드는 코드
         if norm_loc < 1e-6:
             pv = np.array([-dir_v[1], dir_v[0]], dtype=float)
         else:
             pv = np.array([-dy_loc, dx_loc], dtype=float) / norm_loc
 
-        
         # 양의 방향으로 limb 직경 측정
         d_pos = 0.0
         for step in range(1, 150):
@@ -74,7 +73,8 @@ def get_stable_max_diameter_raycast(trimmed_path, binary_image, dir_v, D_xy,
         for step in range(1, 150):
             ny = int(round(ys[i] - pv[1] * step))
             nx = int(round(xs[i] - pv[0] * step))
-
+            
+            #D 기준선 아래쪽에 있는지 위쪽에 있는지 계산하는 거
             proj_D_ray = np.dot(np.array([nx, ny], dtype=float) - D_vec, dir_v)
 
             if (
@@ -92,56 +92,21 @@ def get_stable_max_diameter_raycast(trimmed_path, binary_image, dir_v, D_xy,
         d_neg_list.append(d_neg)
 
     # 노이즈를 방지하기 위해 15% 이상의 값들을 후보로 삼고, 그 중에서 가장 긴 구간이면서 평균이 큰 구간을 찾는 방식
-    widths_s = smooth_1d(widths_raw, k=smooth_k)
-    thr = np.quantile(widths_s, 1.0 - top_ratio)
-    candidate_idx = np.where(widths_s >= thr)[0]
+    widths_s = widths_raw.copy()
 
-    # 모든 지점에서 소수점 단위까지 똑같을 경우. 물론 그런 일은 거의 없겠지만 혹싀 모르니
-    if len(candidate_idx) == 0:
-        best_idx = int(np.argmax(widths_s))
-        stable_width = float(widths_s[best_idx])
-        
-        return {
-            "max_d": float(widths_s[best_idx]), #정맥/동맥 나누는 기준
-            "max_x": int(xs[best_idx]), #그 두께를 잰 지점의 좌표
-            "max_y": int(ys[best_idx]), #그 지점에서 자가 놓인 각도
-            "local_perp_v": pvs[best_idx],  #왼쪽 오른쪽 각각의 거리
-            "d_pos": float(d_pos_list[best_idx]),  # 비대칭 그리기용, 스켈레톤의 양옆이 항상 동일할 수는 없으니
-            "d_neg": float(d_neg_list[best_idx]),  # 비대칭 그리기용
-            "widths_raw": widths_raw,   # 전체 두께 배열
-            "widths_s": widths_s,
-            "plateau_idx": [best_idx],
-        }
-
-    groups = []
-    current = [candidate_idx[0]]
-    for i in candidate_idx[1:]:
-        if i == current[-1] + 1:
-            current.append(i)
-        else:
-            groups.append(current)
-            current = [i]
-    groups.append(current)
-
-    valid_groups = [g for g in groups if len(g) >= min_plateau_len] #혈관의 최대 직경 구간이라면 최소한 3픽셀 
-                                                                    #정도는 꾸준히 굵어야 진짜 혈관 직경으로 
-    if len(valid_groups) == 0:
-        valid_groups = groups
-
-    best_group = max(valid_groups, key=lambda g: (len(g), np.mean(widths_s[g])))
-    center_idx = best_group[len(best_group) // 2]   #대표위치 좌표로 씀.
-    stable_width = float(np.mean(widths_s[best_group]))
+    best_idx = int(np.argmax(widths_s))
+    stable_width = float(widths_s[best_idx])
 
     return {
         "max_d": stable_width,
-        "max_x": int(xs[center_idx]),
-        "max_y": int(ys[center_idx]),
-        "local_perp_v": pvs[center_idx],
-        "d_pos": float(d_pos_list[center_idx]),  # 비대칭 그리기용
-        "d_neg": float(d_neg_list[center_idx]),  # 비대칭 그리기용
+        "max_x": int(xs[best_idx]),
+        "max_y": int(ys[best_idx]),
+        "local_perp_v": pvs[best_idx],
+        "d_pos": float(d_pos_list[best_idx]),
+        "d_neg": float(d_neg_list[best_idx]),
         "widths_raw": widths_raw,
         "widths_s": widths_s,
-        "plateau_idx": best_group,
+        "plateau_idx": [best_idx],
     }
 
 ''''
@@ -208,7 +173,7 @@ def analyze_single_image(image_path, df_keypoints):
         center_xy=D_xy,
         perp_v=perp_v,
         img_shape=preview_cut_skeleton.shape,
-        min_sep=1,
+        #min_sep=1,
         band_height=20
     )
 
@@ -277,9 +242,6 @@ def analyze_single_image(image_path, df_keypoints):
             measure_mask,
             dir_v,
             D_xy,
-            smooth_k=3,
-            top_ratio=0.15,
-            min_plateau_len=3,
         )
         if stable_res is None:
             continue

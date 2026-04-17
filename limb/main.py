@@ -39,76 +39,17 @@ class CapillaryViewer:
         self.ax.clear()
         image_path = self.get_current_image_path()
         result = analyze_single_image(image_path, self.df_keypoints)
-        
 
         if not result["ok"]:
-            img = result.get("img", np.zeros((512, 512)))
-            self.ax.imshow(img, cmap="gray", zorder=0)
-
-            U_xy = result.get("U_xy", None)
-            D_xy = result.get("D_xy", None)
-            dir_v = result.get("dir_v", None)
-            apex_cut_pt = result.get("apex_cut_pt", None)
-            used_branch_pt = result.get("used_branch_pt", None)
-            debug_dline = result.get("debug_dline", None)
-
-            if "binary_image" in result:
-                self.ax.contour(
-                    result["binary_image"].astype(float),
-                    levels=[0.5],
-                    colors="white",
-                    linewidths=0.8,
-                    alpha=0.6,
-                    zorder=1
-                )
-
-            if U_xy is not None:
-                self.ax.scatter(U_xy[0], U_xy[1], c="gray", s=55, edgecolors="white", zorder=5)
-
-            if D_xy is not None:
-                self.ax.scatter(D_xy[0], D_xy[1], c="red", s=65, edgecolors="white", zorder=5)
-
-            if apex_cut_pt is not None:
-                self.ax.scatter(apex_cut_pt[1], apex_cut_pt[0], c="magenta", s=80,
-                                edgecolors="white", marker="o", zorder=5)
-
-            if D_xy is not None and dir_v is not None:
-                perp_v = np.array([-dir_v[1], dir_v[0]], dtype=float)
-                D_vec = np.array([D_xy[0], D_xy[1]], dtype=float)
-                p1_red = D_vec + perp_v * 150
-                p2_red = D_vec - perp_v * 150
-                self.ax.plot(
-                    [p1_red[0], p2_red[0]],
-                    [p1_red[1], p2_red[1]],
-                    color="red", linewidth=2, zorder=4
-                )
-
-            if used_branch_pt is not None:
-                B_vec = np.array([used_branch_pt[1], used_branch_pt[0]], dtype=float)
-                self.ax.scatter(B_vec[0], B_vec[1], c="lime", s=70,
-                                edgecolors="black", marker="s", zorder=5)
-
-            if debug_dline is not None:
-                for _, y, x in debug_dline["hits"]:
-                    self.ax.scatter(x, y, c="lime", s=18, zorder=6)
-
-                if debug_dline["left_seed"] is not None:
-                    self.ax.scatter(debug_dline["left_seed"][1], debug_dline["left_seed"][0],
-                                    c="cyan", s=70, edgecolors="black", zorder=7)
-
-                if debug_dline["right_seed"] is not None:
-                    self.ax.scatter(debug_dline["right_seed"][1], debug_dline["right_seed"][0],
-                                    c="yellow", s=70, edgecolors="black", zorder=7)
-
+            self.ax.imshow(np.zeros((512, 512)), cmap="gray")
             self.ax.text(
-                0.5, 0.05,
+                0.5, 0.5,
                 f"[{self.index + 1}/{len(self.image_files)}]\n"
-                f"{os.path.basename(image_path)}\n{result['reason']}",
+                f"{os.path.basename(image_path)}\n\n{result['reason']}",
                 transform=self.ax.transAxes,
-                ha="center", va="bottom",
+                ha="center", va="center",
                 color="red", fontsize=12
             )
-
             self.ax.axis("off")
             self.fig.tight_layout()
             self.fig.canvas.draw()

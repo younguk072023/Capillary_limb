@@ -6,7 +6,6 @@ from utils import (
     reconstruct_path,
     keep_component_containing_seed,
     find_endpoints,
-    smooth_1d
 )
 # 자를 위치 표시
 def build_cut_skeleton(skeleton, apex_cut_pt, branch_pt=None, dilate_size=3):
@@ -364,54 +363,3 @@ def trim_path_for_measurement(path, U_xy, D_xy, branch_pt=None, min_keep=5, pixe
 
     return trimmed, trimmed[0], trimmed[-1], dir_v
 
-# 혈관의 두께 측정에서 안정적인 최대값을 찾아주는 함수
-def get_stable_max_diameter(trimmed_path, dist_map, smooth_k=5, top_ratio=0.15, min_plateau_len=3):
-    if len(trimmed_path) == 0:
-        return None
-
-    ys = np.array([p[0] for p in trimmed_path])
-    xs = np.array([p[1] for p in trimmed_path])
-
-    radii_raw = dist_map[ys, xs].astype(float)
-    radii_s = smooth_1d(radii_raw, k=smooth_k)
-
-    thr = np.quantile(radii_s, 1.0 - top_ratio)
-    candidate_idx = np.where(radii_s >= thr)[0]
-
-    if len(candidate_idx) == 0:
-        best_idx = int(np.argmax(radii_s))
-        return {
-            "max_d": float(radii_s[best_idx] * 2.0),
-            "max_x": int(xs[best_idx]),
-            "max_y": int(ys[best_idx]),
-            "radii_raw": radii_raw,
-            "radii_s": radii_s,
-            "plateau_idx": [best_idx],
-        }
-
-    groups = []
-    current = [candidate_idx[0]]
-    for i in candidate_idx[1:]:
-        if i == current[-1] + 1:
-            current.append(i)
-        else:
-            groups.append(current)
-            current = [i]
-    groups.append(current)
-
-    valid_groups = [g for g in groups if len(g) >= min_plateau_len]
-    if len(valid_groups) == 0:
-        valid_groups = groups
-
-    best_group = max(valid_groups, key=lambda g: (len(g), np.mean(radii_s[g])))
-    center_idx = best_group[len(best_group) // 2]
-    stable_radius = float(np.mean(radii_s[best_group]))
-
-    return {
-        "max_d": stable_radius * 2.0,
-        "max_x": int(xs[center_idx]),
-        "max_y": int(ys[center_idx]),
-        "radii_raw": radii_raw,
-        "radii_s": radii_s,
-        "plateau_idx": best_group,
-    }

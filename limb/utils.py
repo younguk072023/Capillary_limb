@@ -15,15 +15,6 @@ def get_neighbors(y, x, mask):
                 neighbors.append((ny, nx))
     return neighbors
 
-# 평균내어 수평내는 곳 smootk_k
-def smooth_1d(arr, k=5):
-    if len(arr) < k or k <= 1:
-        return arr.copy()
-    pad = k // 2
-    padded = np.pad(arr, (pad, pad), mode="edge")
-    kernel = np.ones(k, dtype=float) / k
-    return np.convolve(padded, kernel, mode="valid")
-
 # 시작점 seed를 통한 출발 점 찾기
 def geodesic_distances_from_seed(mask, seed):
     q = deque([seed])
