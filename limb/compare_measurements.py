@@ -7,7 +7,7 @@ import pingouin as pg  # ICC 계산을 위한 라이브러리
 import os
 
 # 경로 설정
-MANUAL_CSV = r"C:\Users\park_younguk\Desktop\analysis\total\image\passivity３.csv"
+MANUAL_CSV = r"C:\Users\park_younguk\Desktop\analysis\total\image\passivity.csv"
 ALGO_CSV = r"C:\Users\park_younguk\Desktop\analysis\total\label\Capillary.csv"
 
 def main():
