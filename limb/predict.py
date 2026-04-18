@@ -10,9 +10,8 @@ from analyzer import analyze_single_image
 # ================= 설정 영역 =================
 IMAGE_DIR = r"C:\Users\park_younguk\Desktop\analysis\total\label"  
 KEYPOINT_CSV = r"C:\Users\park_younguk\Desktop\analysis\capillary_keypoint_final.csv"       
-OUTPUT_CSV = os.path.join(IMAGE_DIR, "final_mtl_algo_measurement.csv")
-VISUAL_DIR = os.path.join(IMAGE_DIR, "algo_visual_check2")
-# =============================================
+OUTPUT_CSV = os.path.join(IMAGE_DIR, "algorithm.csv")
+VISUAL_DIR = os.path.join(IMAGE_DIR, "algorithm")
 
 def main():
     print("[좌우 고정 모드] 알고리즘 자동 측정을 시작합니다...")

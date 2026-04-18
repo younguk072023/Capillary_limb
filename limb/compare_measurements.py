@@ -8,7 +8,7 @@ import os
 
 # 경로 설정
 MANUAL_CSV = r"C:\Users\park_younguk\Desktop\analysis\total\image\manual_measurement_results.csv"
-ALGO_CSV = r"C:\Users\park_younguk\Desktop\analysis\total\label\final_mtl_algo_measurement.csv"
+ALGO_CSV = r"C:\Users\park_younguk\Desktop\analysis\total\label\algorithm.csv"
 
 def main():
     print("[Publication Style] 통합 신뢰도 분석 (Pearson, Bland-Altman, ICC) 시작...")
