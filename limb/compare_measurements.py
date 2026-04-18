@@ -7,8 +7,8 @@ import pingouin as pg  # ICC 계산을 위한 라이브러리
 import os
 
 # 경로 설정
-MANUAL_CSV = r"C:\Users\park_younguk\Desktop\analysis\total\image\manual_measurement_results.csv"
-ALGO_CSV = r"C:\Users\park_younguk\Desktop\analysis\total\label\algorithm.csv"
+MANUAL_CSV = r"C:\Users\park_younguk\Desktop\analysis\total\image\passivity３.csv"
+ALGO_CSV = r"C:\Users\park_younguk\Desktop\analysis\total\label\Capillary.csv"
 
 def main():
     print("[Publication Style] 통합 신뢰도 분석 (Pearson, Bland-Altman, ICC) 시작...")
@@ -90,10 +90,31 @@ def main():
     ax2.axhline(0, color='gray', linestyle=':', linewidth=0.8)
 
     # 텍스트 주석 
-    x_pos = ax2.get_xlim()[1] * 0.98
-    ax2.text(x_pos, bias, f'Bias: {bias:.2f}', va='bottom', ha='right', color='darkred', fontweight='bold')
-    ax2.text(x_pos, upper_loa, f'+1.96 SD: {upper_loa:.2f}', va='bottom', ha='right', fontsize=9)
-    ax2.text(x_pos, lower_loa, f'-1.96 SD: {lower_loa:.2f}', va='top', ha='right', fontsize=9)
+    # 텍스트 주석 (예시 이미지처럼 선과 안 겹치게 위/아래로 띄우기)
+    xmin, xmax = ax2.get_xlim()
+    ymin, ymax = ax2.get_ylim()
+
+    # 오른쪽 안쪽 위치
+    x_pos = xmin + 0.80 * (xmax - xmin)
+
+    # y축 높이 기준으로 살짝 띄우기
+    y_offset = 0.35
+
+    # 윗 점선보다 위
+    ax2.text(x_pos, upper_loa + y_offset,
+            f'+1.96 SD: {upper_loa:.2f}',
+            va='bottom', ha='left', fontsize=9, color='black')
+
+    # 빨간선보다 위
+    ax2.text(x_pos, bias + y_offset,
+            f'Bias: {bias:.2f}',
+            va='bottom', ha='left', color='darkred', fontweight='bold')
+
+    # 아랫 점선보다 아래
+    ax2.text(x_pos, lower_loa - y_offset,
+            f'-1.96 SD: {lower_loa:.2f}',
+            va='top', ha='left', fontsize=9, color='black')
+
 
     ax2.set_title(f'Bland-Altman Plot\n(ICC(3,1) = {icc_31:.3f})', fontsize=13, fontweight='bold')
     ax2.set_xlabel('Mean of Measurements (px)', fontsize=11)

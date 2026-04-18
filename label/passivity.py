@@ -9,7 +9,7 @@ import math
 import numpy as np
 
 IMAGE_DIR = r"C:\Users\park_younguk\Desktop\analysis\total\image"  
-CSV_FILENAME = os.path.join(IMAGE_DIR, "manual_measurement_results.csv")
+CSV_FILENAME = os.path.join(IMAGE_DIR, "passivity.csv")
 
 current_points = []
 img_display = None
