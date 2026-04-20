@@ -1,3 +1,8 @@
+'''
+검출못한 이미지 따로 저장
+세동맥 세정맥 검출 코드
+'''
+
 import os
 import cv2
 import pandas as pd

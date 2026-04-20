@@ -8,14 +8,13 @@ import numpy as np
 from analyzer import analyze_single_image
 
 # ================= 설정 영역 =================
-IMAGE_DIR = r"C:\Users\park_younguk\Desktop\analysis\total\label"  
-KEYPOINT_CSV = r"C:\Users\park_younguk\Desktop\analysis\capillary_keypoint_final.csv"       
-OUTPUT_CSV = os.path.join(IMAGE_DIR, "algorithm.csv")
-VISUAL_DIR = os.path.join(IMAGE_DIR, "algorithm")
+IMAGE_DIR = r"C:\Users\park_younguk\Desktop\analysis\effi_mask"  
+KEYPOINT_CSV = r"C:\Users\park_younguk\Desktop\effi_corr\efficientNet-b2.csv"       
+OUTPUT_CSV = os.path.join(IMAGE_DIR, "algorithm_corr.csv")
+VISUAL_DIR = os.path.join(IMAGE_DIR, "algorithm_croo")
 
 def main():
     print("[좌우 고정 모드] 알고리즘 자동 측정을 시작합니다...")
-    
     if not os.path.exists(VISUAL_DIR):
         os.makedirs(VISUAL_DIR)
         print(f"시각화 폴더 생성 완료: {VISUAL_DIR}")
