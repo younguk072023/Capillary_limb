@@ -28,10 +28,7 @@ summary_csv = "limb_total_cluster_summary.csv"
 score_csv = "limb_total_k_scores.csv"
 rep_csv = "limb_total_cluster_representatives.csv"
 
-
-# =========================================
-# 1. CSV 불러오기
-# =========================================
+# CSV 불러오기
 df = pd.read_csv(csv_path, encoding="utf-8-sig")
 
 # 혹시 모를 공백/BOM 제거
@@ -89,10 +86,7 @@ work_df["avg_diameter3"] = (
     work_df["loop_diameter"]
 ) / 3.0
 
-
-# =========================================
-# 4. Clustering에 사용할 feature 선택
-# =========================================
+# Clustering에 사용할 feature 선택
 feature_cols = [
     "arterial_diameter",
     "venous_diameter",
@@ -108,16 +102,12 @@ print(feature_cols)
 print()
 
 
-# =========================================
-# 5. 표준화
-# =========================================
+# 표준화
 scaler = StandardScaler()
 X_scaled = scaler.fit_transform(X)
 
 
-# =========================================
-# 6. PCA 2차원 축소
-# =========================================
+# PCA 2차원 축소
 pca = PCA(n_components=2, random_state=42)
 X_pca = pca.fit_transform(X_scaled)
 
