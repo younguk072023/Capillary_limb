@@ -8,9 +8,9 @@ import numpy as np
 from analyzer import analyze_single_image
 
 # ================= 설정 영역 =================
-IMAGE_DIR = r"C:\Users\park_younguk\Desktop\analysis\effi_mask"  
+IMAGE_DIR = r"C:\Users\park_younguk\Desktop\effi_corr\Total"  
 KEYPOINT_CSV = r"C:\Users\park_younguk\Desktop\effi_corr\efficientNet-b2.csv"       
-OUTPUT_CSV = os.path.join(IMAGE_DIR, "algorithm_corr.csv")
+OUTPUT_CSV = os.path.join(IMAGE_DIR, "algorithm.csv")
 VISUAL_DIR = os.path.join(IMAGE_DIR, "algorithm_croo")
 
 def main():
