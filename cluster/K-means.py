@@ -1,3 +1,6 @@
+'''
+K-means Clustering
+'''
 import os
 os.environ["OMP_NUM_THREADS"] = "6"   # Windows + MKL warning 완화용, sklearn import 전에 두기
 
