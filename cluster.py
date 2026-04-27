@@ -13,9 +13,6 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score, calinski_harabasz_score, davies_bouldin_score
 
 
-# =========================================
-# 0. 경로 설정
-# =========================================
 csv_path = "limb_total.csv"
 image_dir = r"E:\MTL_dataset\image"
 
@@ -38,10 +35,7 @@ print("현재 컬럼명:")
 print(df.columns.tolist())
 print()
 
-
-# =========================================
-# 2. 필수 컬럼 확인
-# =========================================
+# 필수 컬럼 확인
 required_cols = ["filename", "loop_length", "arterial_diameter", "venous_diameter"]
 missing = [c for c in required_cols if c not in df.columns]
 
@@ -68,9 +62,7 @@ if len(work_df) < 3:
     raise ValueError("유효 샘플 수가 너무 적어서 clustering을 진행할 수 없음.")
 
 
-# =========================================
-# 3. Feature Engineering
-# =========================================
+# Feature Engineering
 eps = 1e-6   # 0으로 나누기 방지
 
 # loop_length를 분석용 이름으로 통일
@@ -101,11 +93,9 @@ print("최종 사용할 feature:")
 print(feature_cols)
 print()
 
-
 # 표준화
 scaler = StandardScaler()
 X_scaled = scaler.fit_transform(X)
-
 
 # PCA 2차원 축소
 pca = PCA(n_components=2, random_state=42)
@@ -121,9 +111,7 @@ print(f"합계: {(pca.explained_variance_ratio_[0] + pca.explained_variance_rati
 print()
 
 
-# =========================================
-# 7. K 비교 (2~7)
-# =========================================
+# K 비교 (2~7)
 max_k = min(7, len(work_df) - 1)
 k_list = [k for k in [2, 3, 4, 5, 6, 7] if k <= max_k]
 
@@ -158,35 +146,23 @@ best_k = int(score_df.sort_values("silhouette", ascending=False).iloc[0]["K"])
 print(f"자동 선택된 K (silhouette 기준): {best_k}")
 print()
 
-
-# =========================================
-# 8. 최종 KMeans
-# =========================================
-final_model = KMeans(n_clusters=best_k, random_state=42, n_init=20)
+# 최종 KMeans
+final_model = KMeans(n_clusters=best_k, random_state=42, n_init=20) #20번 반복 실행 후 가장 좋은 결과 선택
 work_df["cluster"] = final_model.fit_predict(X_scaled)
 
-
-# =========================================
-# 9. 군집별 샘플 수
-# =========================================
+# 군집별 샘플 수
 print("=== 군집별 샘플 수 ===")
 print(work_df["cluster"].value_counts().sort_index())
 print()
 
-
-# =========================================
-# 10. 군집별 평균 feature
-# =========================================
+# 군집별 평균 feature
 cluster_summary = work_df.groupby("cluster")[feature_cols].mean().round(3)
 
 print("=== 군집별 평균 feature ===")
 print(cluster_summary)
 print()
 
-
-# =========================================
-# 11. 결과 저장
-# =========================================
+# 결과 저장
 work_df.to_csv(out_csv, index=False, encoding="utf-8-sig")
 cluster_summary.to_csv(summary_csv, encoding="utf-8-sig")
 score_df.to_csv(score_csv, index=False, encoding="utf-8-sig")
@@ -196,10 +172,7 @@ print(f"군집 요약표 저장: {os.path.abspath(summary_csv)}")
 print(f"K 비교 점수 저장: {os.path.abspath(score_csv)}")
 print()
 
-
-# =========================================
-# 12. PCA 시각화
-# =========================================
+# PCA 시각화
 plt.figure(figsize=(8, 6))
 
 for c in sorted(work_df["cluster"].unique()):
@@ -214,10 +187,7 @@ plt.grid(alpha=0.3, linestyle=":")
 plt.tight_layout()
 plt.show()
 
-
-# =========================================
-# 13. filename으로 실제 이미지 경로 찾는 함수
-# =========================================
+# filename으로 실제 이미지 경로 찾는 함수
 def resolve_image_path(image_dir, filename):
     """
     CSV의 filename과 실제 이미지 파일 연결
@@ -248,10 +218,8 @@ def resolve_image_path(image_dir, filename):
     return None
 
 
-# =========================================
-# 14. 각 클러스터 대표 샘플 5개 추출
-#     (군집 중심에 가장 가까운 샘플)
-# =========================================
+
+# 각 클러스터 대표 샘플 5개 추출(군집 중심에 가장 가까운 샘플)
 centers = final_model.cluster_centers_
 rep_rows = []
 missing_files = []
