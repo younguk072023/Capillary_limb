@@ -1,7 +1,10 @@
-'''
+"""
 Hierarchical Clustering
-'''
+"""
+
 import os
+os.environ["OMP_NUM_THREADS"] = "6"
+
 import glob
 import shutil
 import numpy as np
@@ -11,8 +14,13 @@ import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.cluster import AgglomerativeClustering
-from sklearn.metrics import silhouette_score, calinski_harabasz_score, davies_bouldin_score
+from sklearn.metrics import (
+    silhouette_score,
+    calinski_harabasz_score,
+    davies_bouldin_score
+)
 from scipy.cluster.hierarchy import linkage, dendrogram
+
 
 csv_path = "limb_total.csv"
 image_dir = r"E:\MTL_dataset\image"
@@ -20,12 +28,7 @@ image_dir = r"E:\MTL_dataset\image"
 result_dir = "hierarchical_results"
 os.makedirs(result_dir, exist_ok=True)
 
-rep_copy_root = os.path.join(result_dir, "hierarchical_representative_images")
-out_csv = os.path.join(result_dir, "limb_total_hierarchical_clustered_K3.csv")
-summary_csv = os.path.join(result_dir, "limb_total_hierarchical_cluster_summary_K3.csv")
-std_csv = os.path.join(result_dir, "limb_total_hierarchical_cluster_std_K3.csv")
 score_csv = os.path.join(result_dir, "limb_total_hierarchical_k_scores.csv")
-rep_csv = os.path.join(result_dir, "limb_total_hierarchical_representatives_K3.csv")
 pca_loading_csv = os.path.join(result_dir, "limb_total_hierarchical_pca_loadings.csv")
 
 df = pd.read_csv(csv_path, encoding="utf-8-sig")
@@ -42,10 +45,11 @@ required_cols = [
     "venous_diameter"
 ]
 
-missing = [c for c in required_cols if c not in df.columns]\
+missing = [c for c in required_cols if c not in df.columns]
 
 if missing:
     raise ValueError(f"필수 컬럼 누락: {missing}")
+
 
 
 # 필요한 컬럼만 사용
@@ -58,14 +62,11 @@ work_df = df[
     ]
 ].copy()
 
-
 for c in ["loop_length", "arterial_diameter", "venous_diameter"]:
     work_df[c] = pd.to_numeric(work_df[c], errors="coerce")
 
-
 before_n = len(work_df)
 
-#군집화 분석에 쓸 핵심 데이터
 work_df = work_df.dropna(
     subset=[
         "loop_length",
@@ -83,8 +84,12 @@ print()
 if len(work_df) < 3:
     raise ValueError("유효 샘플 수가 너무 적어서 clustering을 진행할 수 없음.")
 
+
+
+# Feature Engineering
 eps = 1e-6
 
+# loop_length를 분석용 이름으로 통일
 work_df["loop_diameter"] = work_df["loop_length"]
 
 # 세정맥 / 세동맥 비율
@@ -93,12 +98,12 @@ work_df["va_ratio"] = (
     (work_df["arterial_diameter"] + eps)
 )
 
+# 전체 직경 평균
 work_df["avg_diameter3"] = (
     work_df["arterial_diameter"] +
     work_df["venous_diameter"] +
     work_df["loop_diameter"]
 ) / 3.0
-
 
 feature_cols = [
     "arterial_diameter",
@@ -118,6 +123,7 @@ for i, col in enumerate(feature_cols, start=1):
     print(f"{i}. {col}")
 print()
 
+# 표준화
 scaler = StandardScaler()
 X_scaled = scaler.fit_transform(X)
 
@@ -149,9 +155,11 @@ print()
 
 pca_loading.to_csv(pca_loading_csv, encoding="utf-8-sig")
 
-
 max_k = min(7, len(work_df) - 1)
 k_list = [k for k in [2, 3, 4, 5, 6, 7] if k <= max_k]
+
+if len(k_list) == 0:
+    raise ValueError("샘플 수가 너무 적어서 K 비교가 불가능함.")
 
 score_rows = []
 
@@ -184,7 +192,8 @@ print()
 
 score_df.to_csv(score_csv, index=False, encoding="utf-8-sig")
 
-# silhouette 최고 K
+
+# silhouette 최고 K 선택
 best_k = int(
     score_df
     .sort_values("silhouette", ascending=False)
@@ -195,21 +204,110 @@ print(f"silhouette 기준 best K: {best_k}")
 print()
 
 
-final_k = 3
+
+# Hierarchical Clustering
+final_k = best_k
+
+print(f"최종 사용 K: {final_k}")
+print()
 
 hier_model = AgglomerativeClustering(
     n_clusters=final_k,
     linkage="ward"
 )
 
-work_df["hier_cluster"] = hier_model.fit_predict(X_scaled)
+# 원래 계층적 군집 번호 저장
+work_df["hier_cluster_raw"] = hier_model.fit_predict(X_scaled)
 
 
-print("=== Hierarchical K=3 군집별 샘플 수 ===")
+# 0 = 세정맥 우세 비대칭형
+# 1 = 전반적 확장형
+# 2 = 소직경 균형형
+
+if final_k == 3:
+    raw_summary = (
+        work_df
+        .groupby("hier_cluster_raw")[feature_cols]
+        .mean()
+    )
+
+    # 1) 세정맥 우세 비대칭형:
+    # V/A ratio가 가장 큰 군집
+    venous_dominant_raw = raw_summary["va_ratio"].idxmax()
+
+    # 나머지 군집
+    remaining_summary = raw_summary.drop(index=venous_dominant_raw)
+
+    # 2) 전반적 확장형:
+    # 평균 직경이 가장 큰 군집
+    enlarged_raw = remaining_summary["avg_diameter3"].idxmax()
+
+    # 3) 소직경 균형형:
+    # 평균 직경이 가장 작은 군집
+    small_balanced_raw = remaining_summary["avg_diameter3"].idxmin()
+
+    label_map = {
+        venous_dominant_raw: 0,
+        enlarged_raw: 1,
+        small_balanced_raw: 2,
+    }
+
+    work_df["hier_cluster"] = (
+        work_df["hier_cluster_raw"]
+        .map(label_map)
+        .astype(int)
+    )
+
+    work_df["hier_cluster_type"] = work_df["hier_cluster"].map(
+        {
+            0: "venous_dominant_asymmetric",
+            1: "global_enlargement",
+            2: "small_balanced",
+        }
+    )
+
+    print("=== Hierarchical raw label → KMeans-style label mapping ===")
+    print(label_map)
+    print()
+
+else:
+    # K=3이 아니면 자동 의미 매핑은 하지 않음
+    # K=4 이상은 중간 균형형 등 추가 군집이 생기므로 별도 해석 필요
+    work_df["hier_cluster"] = work_df["hier_cluster_raw"]
+    work_df["hier_cluster_type"] = "not_mapped"
+
+    print("final_k가 3이 아니므로 KMeans-style label mapping은 적용하지 않음.")
+    print("K=4 이상은 별도 의미 해석 필요.")
+    print()
+
+rep_copy_root = os.path.join(
+    result_dir,
+    f"hierarchical_representative_images_K{final_k}"
+)
+
+out_csv = os.path.join(
+    result_dir,
+    f"limb_total_hierarchical_clustered_K{final_k}.csv"
+)
+
+summary_csv = os.path.join(
+    result_dir,
+    f"limb_total_hierarchical_cluster_summary_K{final_k}.csv"
+)
+
+std_csv = os.path.join(
+    result_dir,
+    f"limb_total_hierarchical_cluster_std_K{final_k}.csv"
+)
+
+rep_csv = os.path.join(
+    result_dir,
+    f"limb_total_hierarchical_representatives_K{final_k}.csv"
+)
+print(f"=== Hierarchical K={final_k} 군집별 샘플 수 ===")
 cluster_counts = work_df["hier_cluster"].value_counts().sort_index()
 print(cluster_counts)
 print()
-
 
 cluster_summary = (
     work_df
@@ -218,10 +316,9 @@ cluster_summary = (
     .round(3)
 )
 
-print("=== Hierarchical K=3 군집별 평균 feature ===")
+print(f"=== Hierarchical K={final_k} 군집별 평균 feature ===")
 print(cluster_summary)
 print()
-
 
 cluster_std = (
     work_df
@@ -230,10 +327,21 @@ cluster_std = (
     .round(3)
 )
 
-print("=== Hierarchical K=3 군집별 feature 표준편차 ===")
+print(f"=== Hierarchical K={final_k} 군집별 feature 표준편차 ===")
 print(cluster_std)
 print()
 
+if final_k == 3:
+    cluster_type_summary = (
+        work_df
+        .groupby(["hier_cluster", "hier_cluster_type"])
+        .size()
+        .reset_index(name="count")
+    )
+
+    print("=== Cluster 번호 의미 ===")
+    print(cluster_type_summary.to_string(index=False))
+    print()
 
 work_df.to_csv(out_csv, index=False, encoding="utf-8-sig")
 cluster_summary.to_csv(summary_csv, encoding="utf-8-sig")
@@ -245,6 +353,9 @@ print(f"군집 표준편차 저장: {os.path.abspath(std_csv)}")
 print(f"K 비교 점수 저장: {os.path.abspath(score_csv)}")
 print()
 
+
+
+# K별 평가 지표 그래프 저장
 plt.figure(figsize=(8, 5))
 plt.plot(score_df["K"], score_df["silhouette"], marker="o")
 plt.axvline(final_k, linestyle=":", linewidth=1.5)
@@ -253,9 +364,11 @@ plt.ylabel("Silhouette score")
 plt.title("Hierarchical Clustering: Silhouette Score by K")
 plt.grid(alpha=0.3, linestyle=":")
 plt.tight_layout()
-plt.savefig(os.path.join(result_dir, "hierarchical_silhouette_by_k.png"), dpi=300)
+plt.savefig(
+    os.path.join(result_dir, "hierarchical_silhouette_by_k.png"),
+    dpi=300
+)
 plt.show()
-
 
 plt.figure(figsize=(8, 5))
 plt.plot(score_df["K"], score_df["calinski_harabasz"], marker="o")
@@ -265,9 +378,11 @@ plt.ylabel("Calinski-Harabasz score")
 plt.title("Hierarchical Clustering: Calinski-Harabasz Score by K")
 plt.grid(alpha=0.3, linestyle=":")
 plt.tight_layout()
-plt.savefig(os.path.join(result_dir, "hierarchical_calinski_by_k.png"), dpi=300)
+plt.savefig(
+    os.path.join(result_dir, "hierarchical_calinski_by_k.png"),
+    dpi=300
+)
 plt.show()
-
 
 plt.figure(figsize=(8, 5))
 plt.plot(score_df["K"], score_df["davies_bouldin"], marker="o")
@@ -277,9 +392,15 @@ plt.ylabel("Davies-Bouldin score")
 plt.title("Hierarchical Clustering: Davies-Bouldin Score by K")
 plt.grid(alpha=0.3, linestyle=":")
 plt.tight_layout()
-plt.savefig(os.path.join(result_dir, "hierarchical_davies_by_k.png"), dpi=300)
+plt.savefig(
+    os.path.join(result_dir, "hierarchical_davies_by_k.png"),
+    dpi=300
+)
 plt.show()
 
+
+
+# PCA 시각화
 plt.figure(figsize=(8, 6))
 
 for c in sorted(work_df["hier_cluster"].unique()):
@@ -299,9 +420,13 @@ plt.title(f"PCA of Hierarchical Clustering Results (K={final_k})")
 plt.legend()
 plt.grid(alpha=0.3, linestyle=":")
 plt.tight_layout()
-plt.savefig(os.path.join(result_dir, "hierarchical_pca_cluster_K3.png"), dpi=300)
+plt.savefig(
+    os.path.join(result_dir, f"hierarchical_pca_cluster_K{final_k}.png"),
+    dpi=300
+)
 plt.show()
 
+# Dendrogram
 
 linked = linkage(X_scaled, method="ward")
 
@@ -315,9 +440,11 @@ plt.title("Hierarchical Clustering Dendrogram (Ward linkage)")
 plt.xlabel("Samples")
 plt.ylabel("Distance")
 plt.tight_layout()
-plt.savefig(os.path.join(result_dir, "hierarchical_dendrogram_full.png"), dpi=300)
+plt.savefig(
+    os.path.join(result_dir, "hierarchical_dendrogram_full.png"),
+    dpi=300
+)
 plt.show()
-
 
 plt.figure(figsize=(12, 6))
 dendrogram(
@@ -331,10 +458,15 @@ plt.title("Truncated Hierarchical Dendrogram (last 30 merged clusters)")
 plt.xlabel("Merged clusters")
 plt.ylabel("Distance")
 plt.tight_layout()
-plt.savefig(os.path.join(result_dir, "hierarchical_dendrogram_truncated.png"), dpi=300)
+plt.savefig(
+    os.path.join(result_dir, "hierarchical_dendrogram_truncated.png"),
+    dpi=300
+)
 plt.show()
 
 
+
+# 15. 대표 이미지 경로 찾기 함수
 def resolve_image_path(image_dir, filename):
     """
     CSV의 filename과 실제 이미지 파일 연결
@@ -419,23 +551,25 @@ for c in sorted(work_df["hier_cluster"].unique()):
             dst_path = os.path.join(cluster_dir, os.path.basename(img_path))
             shutil.copy2(img_path, dst_path)
 
-        rep_rows.append(
-            {
-                "hier_cluster": c,
-                "filename": fname,
-                "distance_to_cluster_mean": round(dist, 4),
-                "arterial_diameter": round(work_df.loc[idx, "arterial_diameter"], 3),
-                "venous_diameter": round(work_df.loc[idx, "venous_diameter"], 3),
-                "loop_diameter": round(work_df.loc[idx, "loop_diameter"], 3),
-                "va_ratio": round(work_df.loc[idx, "va_ratio"], 3),
-                "avg_diameter3": round(work_df.loc[idx, "avg_diameter3"], 3),
-                "copied": copied,
-                "reason": reason,
-            }
-        )
+        row = {
+            "hier_cluster": c,
+            "filename": fname,
+            "distance_to_cluster_mean": round(dist, 4),
+            "arterial_diameter": round(work_df.loc[idx, "arterial_diameter"], 3),
+            "venous_diameter": round(work_df.loc[idx, "venous_diameter"], 3),
+            "loop_diameter": round(work_df.loc[idx, "loop_diameter"], 3),
+            "va_ratio": round(work_df.loc[idx, "va_ratio"], 3),
+            "avg_diameter3": round(work_df.loc[idx, "avg_diameter3"], 3),
+            "copied": copied,
+            "reason": reason,
+        }
+
+        if "hier_cluster_type" in work_df.columns:
+            row["hier_cluster_type"] = work_df.loc[idx, "hier_cluster_type"]
+
+        rep_rows.append(row)
 
 rep_df = pd.DataFrame(rep_rows)
-
 rep_df.to_csv(rep_csv, index=False, encoding="utf-8-sig")
 
 print("=== Hierarchical 각 클러스터 대표 이미지 5개 ===")
@@ -457,7 +591,8 @@ else:
 
 print("=========================================")
 print("Hierarchical Clustering 분석 완료")
-print("결과 해석 시 K-Means K=3 결과와 비교해서")
-print("세정맥 우세형 / 전반적 확장형 / 소직경 균형형 구조가")
-print("유사하게 나오는지 확인하면 됨.")
+print("K-Means와 동일한 의미 체계로 label 정렬 완료")
+print("Cluster 0 = 세정맥 우세 비대칭형")
+print("Cluster 1 = 전반적 확장형")
+print("Cluster 2 = 소직경 균형형")
 print("=========================================")
