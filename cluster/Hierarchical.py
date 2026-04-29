@@ -2,8 +2,6 @@
 Hierarchical Clustering
 '''
 import os
-os.environ["OMP_NUM_THREADS"] = "6"
-
 import glob
 import shutil
 import numpy as np
@@ -14,24 +12,15 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.cluster import AgglomerativeClustering
 from sklearn.metrics import silhouette_score, calinski_harabasz_score, davies_bouldin_score
-
 from scipy.cluster.hierarchy import linkage, dendrogram
 
-
-# =========================================
-# 0. 경로 설정
-# =========================================
 csv_path = "limb_total.csv"
 image_dir = r"E:\MTL_dataset\image"
 
-# Hierarchical 결과 저장 폴더
 result_dir = "hierarchical_results"
 os.makedirs(result_dir, exist_ok=True)
 
-# 대표 이미지 복사 저장 폴더
 rep_copy_root = os.path.join(result_dir, "hierarchical_representative_images")
-
-# 결과 CSV 저장명
 out_csv = os.path.join(result_dir, "limb_total_hierarchical_clustered_K3.csv")
 summary_csv = os.path.join(result_dir, "limb_total_hierarchical_cluster_summary_K3.csv")
 std_csv = os.path.join(result_dir, "limb_total_hierarchical_cluster_std_K3.csv")
@@ -39,23 +28,13 @@ score_csv = os.path.join(result_dir, "limb_total_hierarchical_k_scores.csv")
 rep_csv = os.path.join(result_dir, "limb_total_hierarchical_representatives_K3.csv")
 pca_loading_csv = os.path.join(result_dir, "limb_total_hierarchical_pca_loadings.csv")
 
-
-# =========================================
-# 1. CSV 불러오기
-# =========================================
 df = pd.read_csv(csv_path, encoding="utf-8-sig")
-
-# 컬럼명 공백/BOM 제거
 df.columns = df.columns.str.strip().str.replace("\ufeff", "", regex=False)
 
 print("현재 컬럼명:")
 print(df.columns.tolist())
 print()
 
-
-# =========================================
-# 2. 필수 컬럼 확인
-# =========================================
 required_cols = [
     "filename",
     "loop_length",
@@ -63,7 +42,7 @@ required_cols = [
     "venous_diameter"
 ]
 
-missing = [c for c in required_cols if c not in df.columns]
+missing = [c for c in required_cols if c not in df.columns]\
 
 if missing:
     raise ValueError(f"필수 컬럼 누락: {missing}")
@@ -80,14 +59,13 @@ work_df = df[
 ].copy()
 
 
-# 숫자형 변환
 for c in ["loop_length", "arterial_diameter", "venous_diameter"]:
     work_df[c] = pd.to_numeric(work_df[c], errors="coerce")
 
 
-# 결측 제거
 before_n = len(work_df)
 
+#군집화 분석에 쓸 핵심 데이터
 work_df = work_df.dropna(
     subset=[
         "loop_length",
@@ -105,13 +83,8 @@ print()
 if len(work_df) < 3:
     raise ValueError("유효 샘플 수가 너무 적어서 clustering을 진행할 수 없음.")
 
-
-# =========================================
-# 3. Feature Engineering
-# =========================================
 eps = 1e-6
 
-# loop_length를 분석용 이름으로 통일
 work_df["loop_diameter"] = work_df["loop_length"]
 
 # 세정맥 / 세동맥 비율
@@ -120,7 +93,6 @@ work_df["va_ratio"] = (
     (work_df["arterial_diameter"] + eps)
 )
 
-# 전체 capillary 크기 요약값
 work_df["avg_diameter3"] = (
     work_df["arterial_diameter"] +
     work_df["venous_diameter"] +
@@ -128,7 +100,6 @@ work_df["avg_diameter3"] = (
 ) / 3.0
 
 
-# Clustering에 사용할 feature
 feature_cols = [
     "arterial_diameter",
     "venous_diameter",
@@ -137,7 +108,6 @@ feature_cols = [
     "avg_diameter3",
 ]
 
-# inf, NaN 방어
 work_df = work_df.replace([np.inf, -np.inf], np.nan)
 work_df = work_df.dropna(subset=feature_cols).reset_index(drop=True)
 
@@ -148,17 +118,10 @@ for i, col in enumerate(feature_cols, start=1):
     print(f"{i}. {col}")
 print()
 
-
-# =========================================
-# 4. 표준화
-# =========================================
 scaler = StandardScaler()
 X_scaled = scaler.fit_transform(X)
 
 
-# =========================================
-# 5. PCA 2차원 축소
-# =========================================
 pca = PCA(n_components=2, random_state=42)
 X_pca = pca.fit_transform(X_scaled)
 
@@ -174,8 +137,6 @@ print(
 )
 print()
 
-
-# PCA loading 저장
 pca_loading = pd.DataFrame(
     pca.components_.T,
     index=feature_cols,
@@ -189,9 +150,6 @@ print()
 pca_loading.to_csv(pca_loading_csv, encoding="utf-8-sig")
 
 
-# =========================================
-# 6. Hierarchical Clustering K 비교
-# =========================================
 max_k = min(7, len(work_df) - 1)
 k_list = [k for k in [2, 3, 4, 5, 6, 7] if k <= max_k]
 
@@ -237,9 +195,6 @@ print(f"silhouette 기준 best K: {best_k}")
 print()
 
 
-# =========================================
-# 7. 논문 비교용 K=3 Hierarchical Clustering
-# =========================================
 final_k = 3
 
 hier_model = AgglomerativeClustering(
@@ -250,18 +205,12 @@ hier_model = AgglomerativeClustering(
 work_df["hier_cluster"] = hier_model.fit_predict(X_scaled)
 
 
-# =========================================
-# 8. 군집별 샘플 수
-# =========================================
 print("=== Hierarchical K=3 군집별 샘플 수 ===")
 cluster_counts = work_df["hier_cluster"].value_counts().sort_index()
 print(cluster_counts)
 print()
 
 
-# =========================================
-# 9. 군집별 평균 feature
-# =========================================
 cluster_summary = (
     work_df
     .groupby("hier_cluster")[feature_cols]
@@ -286,9 +235,6 @@ print(cluster_std)
 print()
 
 
-# =========================================
-# 10. 결과 저장
-# =========================================
 work_df.to_csv(out_csv, index=False, encoding="utf-8-sig")
 cluster_summary.to_csv(summary_csv, encoding="utf-8-sig")
 cluster_std.to_csv(std_csv, encoding="utf-8-sig")
@@ -299,10 +245,6 @@ print(f"군집 표준편차 저장: {os.path.abspath(std_csv)}")
 print(f"K 비교 점수 저장: {os.path.abspath(score_csv)}")
 print()
 
-
-# =========================================
-# 11. K 비교 점수 시각화
-# =========================================
 plt.figure(figsize=(8, 5))
 plt.plot(score_df["K"], score_df["silhouette"], marker="o")
 plt.axvline(final_k, linestyle=":", linewidth=1.5)
@@ -338,10 +280,6 @@ plt.tight_layout()
 plt.savefig(os.path.join(result_dir, "hierarchical_davies_by_k.png"), dpi=300)
 plt.show()
 
-
-# =========================================
-# 12. PCA 시각화
-# =========================================
 plt.figure(figsize=(8, 6))
 
 for c in sorted(work_df["hier_cluster"].unique()):
@@ -365,11 +303,6 @@ plt.savefig(os.path.join(result_dir, "hierarchical_pca_cluster_K3.png"), dpi=300
 plt.show()
 
 
-# =========================================
-# 13. Dendrogram 생성
-# =========================================
-# 전체 샘플 dendrogram은 1388개라 너무 빽빽함.
-# 그래도 구조 확인용으로 labels 없이 저장.
 linked = linkage(X_scaled, method="ward")
 
 plt.figure(figsize=(14, 7))
@@ -386,7 +319,6 @@ plt.savefig(os.path.join(result_dir, "hierarchical_dendrogram_full.png"), dpi=30
 plt.show()
 
 
-# 보기 편한 truncated dendrogram
 plt.figure(figsize=(12, 6))
 dendrogram(
     linked,
@@ -403,10 +335,6 @@ plt.savefig(os.path.join(result_dir, "hierarchical_dendrogram_truncated.png"), d
 plt.show()
 
 
-# =========================================
-# 14. filename으로 실제 이미지 경로 찾는 함수
-# 하위 폴더까지 검색
-# =========================================
 def resolve_image_path(image_dir, filename):
     """
     CSV의 filename과 실제 이미지 파일 연결
@@ -448,12 +376,6 @@ def resolve_image_path(image_dir, filename):
 
     return None
 
-
-# =========================================
-# 15. Hierarchical 각 cluster 대표 샘플 5개 추출
-# AgglomerativeClustering은 중심점이 없으므로
-# 각 cluster의 평균 feature vector를 centroid처럼 계산
-# =========================================
 rep_rows = []
 missing_files = []
 
@@ -533,10 +455,6 @@ else:
     print("모든 대표 이미지 복사 성공")
     print()
 
-
-# =========================================
-# 16. 최종 안내
-# =========================================
 print("=========================================")
 print("Hierarchical Clustering 분석 완료")
 print("결과 해석 시 K-Means K=3 결과와 비교해서")
