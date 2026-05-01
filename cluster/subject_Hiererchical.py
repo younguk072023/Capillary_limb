@@ -1,16 +1,5 @@
 """
 Subject-level Cluster Composition Analysis
-
-목적:
-- 전체 1388장에 대해 이미 부여된 cluster label을 사용
-- 각 피험자별로 Cluster 0, 1, 2가 몇 개씩 나오는지 확인
-- 피험자별 cluster 비율 계산
-- dominant cluster 확인
-- stacked bar plot / heatmap 저장
-
-전제:
-- hierarchical_results/limb_total_hierarchical_clustered_K3.csv 파일이 존재해야 함
-- 해당 CSV 안에 filename, hier_cluster 컬럼이 있어야 함
 """
 
 import os
