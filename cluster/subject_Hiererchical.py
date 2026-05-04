@@ -55,10 +55,8 @@ dominant_bar_png = os.path.join(
 )
 
 
-# =========================================================
-# 1. 군집화 결과 CSV 불러오기
-# =========================================================
 
+# 군집화 결과 CSV 불러오기
 df = pd.read_csv(clustered_csv, encoding="utf-8-sig")
 df.columns = df.columns.str.strip().str.replace("\ufeff", "", regex=False)
 
@@ -67,10 +65,8 @@ print(df.columns.tolist())
 print()
 
 
-# =========================================================
-# 2. 필수 컬럼 확인
-# =========================================================
 
+# 필수 컬럼 확인
 required_cols = ["filename", "hier_cluster"]
 
 missing = [c for c in required_cols if c not in df.columns]
@@ -82,12 +78,9 @@ print(f"전체 샘플 수: {len(df)}")
 print()
 
 
-# =========================================================
-# 3. filename에서 subject ID 추출
-# =========================================================
-# 예:
-# p18_det_076_crop_0.png -> p18
-# p1_det_103.png         -> p1
+
+# filename에서 subject ID 추출
+
 
 df["subject"] = (
     df["filename"]
@@ -115,9 +108,8 @@ print(sorted(df["subject"].unique(), key=lambda x: int(x.replace("p", ""))))
 print()
 
 
-# =========================================================
-# 4. cluster 번호 의미 지정
-# =========================================================
+
+# cluster 번호 의미 지정
 # 네가 K-Means와 맞춘 번호 체계 기준:
 # Cluster 0 = 세정맥 우세 비대칭형
 # Cluster 1 = 전반적 확장형
@@ -144,9 +136,8 @@ if unknown_cluster > 0:
     df["cluster_type"] = df["cluster_type"].fillna("unknown")
 
 
-# =========================================================
-# 5. 피험자별 cluster 개수 계산
-# =========================================================
+
+# 피험자별 cluster 개수 계산
 
 subject_cluster_count = pd.crosstab(
     df["subject"],
@@ -172,9 +163,8 @@ print(subject_cluster_count)
 print()
 
 
-# =========================================================
+
 # 6. 피험자별 cluster 비율 계산
-# =========================================================
 
 subject_cluster_ratio = subject_cluster_count.div(
     subject_cluster_count.sum(axis=1),
@@ -186,9 +176,8 @@ print(subject_cluster_ratio.round(3))
 print()
 
 
-# =========================================================
+
 # 7. 피험자별 dominant cluster 계산
-# =========================================================
 
 subject_summary = subject_cluster_ratio.copy()
 
@@ -206,9 +195,9 @@ print(subject_summary.round(3))
 print()
 
 
-# =========================================================
-# 8. CSV 저장
-# =========================================================
+
+# CSV 저장
+
 
 subject_cluster_count.to_csv(
     subject_count_csv,
@@ -231,9 +220,8 @@ print(f"피험자별 요약 저장: {os.path.abspath(subject_summary_csv)}")
 print()
 
 
-# =========================================================
-# 9. 피험자별 cluster 비율 Stacked Bar Plot
-# =========================================================
+
+# 피험자별 cluster 비율 Stacked Bar Plot
 
 plt.figure(figsize=(14, 6))
 
@@ -273,9 +261,7 @@ print(f"Stacked bar plot 저장: {os.path.abspath(stacked_bar_png)}")
 print()
 
 
-# =========================================================
-# 10. 피험자별 cluster 비율 Heatmap
-# =========================================================
+# 피험자별 cluster 비율 Heatmap
 
 heatmap_data = subject_cluster_ratio.copy()
 
@@ -323,9 +309,8 @@ print(f"Heatmap 저장: {os.path.abspath(heatmap_png)}")
 print()
 
 
-# =========================================================
-# 11. Dominant cluster 분포 Bar Plot
-# =========================================================
+
+# Dominant cluster 분포 Bar Plot
 
 dominant_counts = (
     subject_summary["dominant_cluster"]
@@ -362,10 +347,7 @@ print(f"Dominant cluster bar plot 저장: {os.path.abspath(dominant_bar_png)}")
 print()
 
 
-# =========================================================
-# 12. 결과 해석용 출력
-# =========================================================
-
+# 결과 해석용 출력
 print("=========================================")
 print("Subject-level cluster composition 분석 완료")
 print("Cluster 번호 의미:")
