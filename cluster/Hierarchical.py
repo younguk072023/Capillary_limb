@@ -1,5 +1,5 @@
 """
-Hierarchical Clustering
+Hierarchical Clustering + Kruskal-Wallis + Effect Size + Dunn Post-hoc + Boxplot
 """
 
 import os
@@ -19,8 +19,26 @@ from sklearn.metrics import (
     calinski_harabasz_score,
     davies_bouldin_score
 )
-from scipy.cluster.hierarchy import linkage, dendrogram
 
+from scipy.cluster.hierarchy import linkage, dendrogram
+from scipy.stats import kruskal
+
+# Dunn post-hoc test용 패키지
+# 설치가 안 되어 있으면 Dunn test만 건너뜀
+try:
+    import scikit_posthocs as sp
+    SCIPOSTHOCS_AVAILABLE = True
+except ImportError:
+    SCIPOSTHOCS_AVAILABLE = False
+    print("scikit-posthocs가 설치되어 있지 않음.")
+    print("Dunn post-hoc test를 수행하려면 아래 명령어로 설치:")
+    print("pip install scikit-posthocs")
+    print()
+
+
+# ============================================================
+# 1. 기본 경로 설정
+# ============================================================
 
 csv_path = "limb_total.csv"
 image_dir = r"E:\MTL_dataset\image"
@@ -30,6 +48,11 @@ os.makedirs(result_dir, exist_ok=True)
 
 score_csv = os.path.join(result_dir, "limb_total_hierarchical_k_scores.csv")
 pca_loading_csv = os.path.join(result_dir, "limb_total_hierarchical_pca_loadings.csv")
+
+
+# ============================================================
+# 2. CSV 로드 및 컬럼 확인
+# ============================================================
 
 df = pd.read_csv(csv_path, encoding="utf-8-sig")
 df.columns = df.columns.str.strip().str.replace("\ufeff", "", regex=False)
@@ -51,8 +74,10 @@ if missing:
     raise ValueError(f"필수 컬럼 누락: {missing}")
 
 
+# ============================================================
+# 3. 필요한 컬럼만 사용
+# ============================================================
 
-# 필요한 컬럼만 사용
 work_df = df[
     [
         "filename",
@@ -85,8 +110,10 @@ if len(work_df) < 3:
     raise ValueError("유효 샘플 수가 너무 적어서 clustering을 진행할 수 없음.")
 
 
+# ============================================================
+# 4. Feature Engineering
+# ============================================================
 
-# Feature Engineering
 eps = 1e-6
 
 # loop_length를 분석용 이름으로 통일
@@ -123,10 +150,18 @@ for i, col in enumerate(feature_cols, start=1):
     print(f"{i}. {col}")
 print()
 
-# 표준화
+
+# ============================================================
+# 5. 표준화
+# ============================================================
+
 scaler = StandardScaler()
 X_scaled = scaler.fit_transform(X)
 
+
+# ============================================================
+# 6. PCA
+# ============================================================
 
 pca = PCA(n_components=2, random_state=42)
 X_pca = pca.fit_transform(X_scaled)
@@ -154,6 +189,11 @@ print(pca_loading.round(4))
 print()
 
 pca_loading.to_csv(pca_loading_csv, encoding="utf-8-sig")
+
+
+# ============================================================
+# 7. Hierarchical Clustering K 비교
+# ============================================================
 
 max_k = min(7, len(work_df) - 1)
 k_list = [k for k in [2, 3, 4, 5, 6, 7] if k <= max_k]
@@ -204,8 +244,10 @@ print(f"silhouette 기준 best K: {best_k}")
 print()
 
 
+# ============================================================
+# 8. 최종 Hierarchical Clustering
+# ============================================================
 
-# Hierarchical Clustering
 final_k = best_k
 
 print(f"최종 사용 K: {final_k}")
@@ -219,6 +261,10 @@ hier_model = AgglomerativeClustering(
 # 원래 계층적 군집 번호 저장
 work_df["hier_cluster_raw"] = hier_model.fit_predict(X_scaled)
 
+
+# ============================================================
+# 9. K=3일 경우 군집 의미 재매핑
+# ============================================================
 
 # 0 = 세정맥 우세 비대칭형
 # 1 = 전반적 확장형
@@ -280,6 +326,11 @@ else:
     print("K=4 이상은 별도 의미 해석 필요.")
     print()
 
+
+# ============================================================
+# 10. 저장 경로 설정
+# ============================================================
+
 rep_copy_root = os.path.join(
     result_dir,
     f"hierarchical_representative_images_K{final_k}"
@@ -304,6 +355,35 @@ rep_csv = os.path.join(
     result_dir,
     f"limb_total_hierarchical_representatives_K{final_k}.csv"
 )
+
+kruskal_csv = os.path.join(
+    result_dir,
+    f"limb_total_hierarchical_kruskal_K{final_k}.csv"
+)
+
+dunn_summary_csv = os.path.join(
+    result_dir,
+    f"limb_total_hierarchical_dunn_summary_K{final_k}.csv"
+)
+
+dunn_dir = os.path.join(
+    result_dir,
+    f"dunn_posthoc_K{final_k}"
+)
+
+boxplot_dir = os.path.join(
+    result_dir,
+    f"cluster_boxplots_K{final_k}"
+)
+
+os.makedirs(dunn_dir, exist_ok=True)
+os.makedirs(boxplot_dir, exist_ok=True)
+
+
+# ============================================================
+# 11. 군집별 요약 통계
+# ============================================================
+
 print(f"=== Hierarchical K={final_k} 군집별 샘플 수 ===")
 cluster_counts = work_df["hier_cluster"].value_counts().sort_index()
 print(cluster_counts)
@@ -343,6 +423,345 @@ if final_k == 3:
     print(cluster_type_summary.to_string(index=False))
     print()
 
+
+# ============================================================
+# 12. Kruskal-Wallis Test
+# ============================================================
+# 목적:
+# 군집별로 arterial_diameter, venous_diameter, loop_diameter,
+# va_ratio, avg_diameter3 값이 통계적으로 다른지 확인
+#
+# 해석:
+# p < 0.05이면 해당 feature는 군집 간 유의한 차이가 있다고 해석 가능
+# 여러 feature를 동시에 검정하므로 Bonferroni 보정 p-value도 같이 저장
+# ============================================================
+
+cluster_col = "hier_cluster"
+
+kruskal_rows = []
+
+print("=== Kruskal-Wallis test: 군집 간 feature 차이 검정 ===")
+
+for feature in feature_cols:
+    groups = []
+    group_sizes = {}
+
+    for c in sorted(work_df[cluster_col].unique()):
+        values = work_df.loc[work_df[cluster_col] == c, feature].dropna()
+        groups.append(values)
+        group_sizes[f"cluster_{c}_n"] = len(values)
+
+    # 군집이 2개 이상이고, 각 군집에 값이 있어야 검정 가능
+    if len(groups) < 2 or any(len(g) == 0 for g in groups):
+        print(f"{feature}: 검정 불가 - 군집 수 또는 샘플 수 부족")
+        continue
+
+    h_stat, p_value = kruskal(*groups)
+
+    row = {
+        "feature": feature,
+        "H_statistic": h_stat,
+        "p_value": p_value,
+        "significant_p_0.05": p_value < 0.05
+    }
+
+    row.update(group_sizes)
+    kruskal_rows.append(row)
+
+    print(
+        f"{feature}: "
+        f"H = {h_stat:.4f}, "
+        f"p = {p_value:.6f}, "
+        f"significant = {p_value < 0.05}"
+    )
+
+kruskal_df = pd.DataFrame(kruskal_rows)
+
+if len(kruskal_df) > 0:
+    # Bonferroni correction
+    # 여러 feature를 동시에 검정하므로 단순 보정값을 함께 제시
+    kruskal_df["p_bonferroni"] = (
+        kruskal_df["p_value"] * len(kruskal_df)
+    ).clip(upper=1.0)
+
+    kruskal_df["significant_bonferroni_0.05"] = (
+        kruskal_df["p_bonferroni"] < 0.05
+    )
+
+    # ========================================================
+    # 12-1. Kruskal-Wallis effect size: epsilon squared
+    # ========================================================
+    # 목적:
+    # p-value가 유의한지뿐 아니라 차이의 크기도 확인
+    #
+    # epsilon_squared 해석:
+    # 0에 가까움: 군집 차이 작음
+    # 1에 가까움: 군집 차이 큼
+    # ========================================================
+
+    n_total = len(work_df)
+    k_groups = work_df["hier_cluster"].nunique()
+
+    if n_total > k_groups:
+        kruskal_df["epsilon_squared"] = (
+            (kruskal_df["H_statistic"] - k_groups + 1) /
+            (n_total - k_groups)
+        )
+        kruskal_df["epsilon_squared"] = (
+            kruskal_df["epsilon_squared"]
+            .clip(lower=0, upper=1)
+        )
+    else:
+        kruskal_df["epsilon_squared"] = np.nan
+
+    kruskal_df = kruskal_df.sort_values("p_value")
+
+    print()
+    print("=== Kruskal-Wallis 결과 요약 + effect size ===")
+    print(kruskal_df.to_string(index=False))
+    print()
+
+    kruskal_df.to_csv(
+        kruskal_csv,
+        index=False,
+        encoding="utf-8-sig"
+    )
+
+    print(f"Kruskal-Wallis 결과 저장: {os.path.abspath(kruskal_csv)}")
+    print()
+
+else:
+    print("Kruskal-Wallis 결과가 생성되지 않았음.")
+    print()
+
+
+# ============================================================
+# 13. Dunn Post-hoc Test
+# ============================================================
+# 목적:
+# Kruskal-Wallis에서 유의한 feature에 대해
+# 어느 군집끼리 차이가 나는지 확인
+#
+# 예:
+# Cluster 0 vs Cluster 1
+# Cluster 0 vs Cluster 2
+# Cluster 1 vs Cluster 2
+# ============================================================
+
+dunn_summary_rows = []
+
+if len(kruskal_df) > 0 and SCIPOSTHOCS_AVAILABLE:
+    print("=== Dunn post-hoc test: 군집 간 쌍별 비교 ===")
+
+    for feature in feature_cols:
+        matched = kruskal_df.loc[
+            kruskal_df["feature"] == feature,
+            "p_bonferroni"
+        ]
+
+        if len(matched) == 0:
+            print(f"{feature}: Kruskal-Wallis 결과 없음. Dunn test 생략")
+            continue
+
+        p_val = matched.values[0]
+
+        # Bonferroni 보정 후 유의하지 않으면 Dunn 생략
+        if p_val >= 0.05:
+            print(f"{feature}: Bonferroni 보정 후 유의하지 않아 Dunn test 생략")
+            continue
+
+        dunn_result = sp.posthoc_dunn(
+            work_df,
+            val_col=feature,
+            group_col="hier_cluster",
+            p_adjust="bonferroni"
+        )
+
+        dunn_csv = os.path.join(
+            dunn_dir,
+            f"dunn_posthoc_{feature}_K{final_k}.csv"
+        )
+
+        dunn_result.to_csv(dunn_csv, encoding="utf-8-sig")
+
+        print()
+        print(f"=== Dunn post-hoc: {feature} ===")
+        print(dunn_result)
+        print(f"저장: {os.path.abspath(dunn_csv)}")
+
+        clusters = sorted(work_df["hier_cluster"].unique())
+
+        for i in range(len(clusters)):
+            for j in range(i + 1, len(clusters)):
+                c1 = clusters[i]
+                c2 = clusters[j]
+
+                try:
+                    pair_p = dunn_result.loc[c1, c2]
+                except KeyError:
+                    pair_p = dunn_result.loc[str(c1), str(c2)]
+
+                dunn_summary_rows.append(
+                    {
+                        "feature": feature,
+                        "comparison": f"cluster_{c1}_vs_cluster_{c2}",
+                        "p_adjusted": pair_p,
+                        "significant_0.05": pair_p < 0.05
+                    }
+                )
+
+    dunn_summary_df = pd.DataFrame(dunn_summary_rows)
+
+    if len(dunn_summary_df) > 0:
+        dunn_summary_df.to_csv(
+            dunn_summary_csv,
+            index=False,
+            encoding="utf-8-sig"
+        )
+
+        print()
+        print("=== Dunn post-hoc summary ===")
+        print(dunn_summary_df.to_string(index=False))
+        print(f"Dunn summary 저장: {os.path.abspath(dunn_summary_csv)}")
+        print()
+    else:
+        print("Dunn post-hoc summary가 생성되지 않았음.")
+        print()
+
+elif not SCIPOSTHOCS_AVAILABLE:
+    print("scikit-posthocs가 없어 Dunn post-hoc test를 건너뜀.")
+    print("필요하면 터미널에서 다음 명령 실행:")
+    print("pip install scikit-posthocs")
+    print()
+else:
+    print("Kruskal-Wallis 결과가 없어 Dunn post-hoc test를 건너뜀.")
+    print()
+
+
+# ============================================================
+# 14. Cluster-wise Boxplot
+# ============================================================
+# 목적:
+# 군집별 feature 분포를 그림으로 확인
+# 논문 Figure 후보로 사용 가능
+# ============================================================
+
+print("=== Cluster-wise boxplot 저장 ===")
+
+for feature in feature_cols:
+    plt.figure(figsize=(7, 5))
+
+    sorted_clusters = sorted(work_df["hier_cluster"].unique())
+
+    data_to_plot = [
+        work_df.loc[work_df["hier_cluster"] == c, feature].dropna()
+        for c in sorted_clusters
+    ]
+
+    label_names = []
+
+    for c in sorted_clusters:
+        if final_k == 3:
+            c_type = (
+                work_df.loc[work_df["hier_cluster"] == c, "hier_cluster_type"]
+                .iloc[0]
+            )
+            label_names.append(f"C{c}\n{c_type}")
+        else:
+            label_names.append(f"Cluster {c}")
+
+    plt.boxplot(
+        data_to_plot,
+        tick_labels=label_names,
+        showfliers=False
+    )
+
+    plt.xlabel("Cluster")
+    plt.ylabel(feature)
+    plt.title(f"{feature} by cluster")
+    plt.grid(alpha=0.3, linestyle=":")
+    plt.tight_layout()
+
+    save_path = os.path.join(
+        boxplot_dir,
+        f"boxplot_{feature}_K{final_k}.png"
+    )
+
+    plt.savefig(save_path, dpi=300)
+    plt.show()
+
+    print(f"Boxplot 저장: {os.path.abspath(save_path)}")
+
+print()
+
+
+# ============================================================
+# 15. 군집 해석용 통합 요약표 저장
+# ============================================================
+# 목적:
+# 논문 Results 표로 쓰기 쉽게 평균, 표준편차, 샘플 수, 군집명 통합
+# ============================================================
+
+cluster_summary_mean = (
+    work_df
+    .groupby("hier_cluster")[feature_cols]
+    .mean()
+)
+
+cluster_summary_std = (
+    work_df
+    .groupby("hier_cluster")[feature_cols]
+    .std()
+)
+
+cluster_summary_count = (
+    work_df
+    .groupby("hier_cluster")
+    .size()
+    .rename("n")
+)
+
+cluster_interpretation = cluster_summary_mean.copy()
+cluster_interpretation.columns = [
+    f"{c}_mean" for c in cluster_interpretation.columns
+]
+
+for col in feature_cols:
+    cluster_interpretation[f"{col}_std"] = cluster_summary_std[col]
+
+cluster_interpretation["n"] = cluster_summary_count
+
+if "hier_cluster_type" in work_df.columns:
+    cluster_type_map = (
+        work_df
+        .groupby("hier_cluster")["hier_cluster_type"]
+        .first()
+    )
+    cluster_interpretation["cluster_type"] = cluster_type_map
+
+cluster_interpretation = cluster_interpretation.reset_index()
+
+cluster_interpretation_csv = os.path.join(
+    result_dir,
+    f"limb_total_hierarchical_cluster_interpretation_K{final_k}.csv"
+)
+
+cluster_interpretation.to_csv(
+    cluster_interpretation_csv,
+    index=False,
+    encoding="utf-8-sig"
+)
+
+print("=== 군집 해석용 통합 요약표 ===")
+print(cluster_interpretation.round(3).to_string(index=False))
+print(f"군집 해석용 통합 요약표 저장: {os.path.abspath(cluster_interpretation_csv)}")
+print()
+
+
+# ============================================================
+# 16. CSV 저장
+# ============================================================
+
 work_df.to_csv(out_csv, index=False, encoding="utf-8-sig")
 cluster_summary.to_csv(summary_csv, encoding="utf-8-sig")
 cluster_std.to_csv(std_csv, encoding="utf-8-sig")
@@ -354,8 +773,10 @@ print(f"K 비교 점수 저장: {os.path.abspath(score_csv)}")
 print()
 
 
+# ============================================================
+# 17. K별 평가 지표 그래프 저장
+# ============================================================
 
-# K별 평가 지표 그래프 저장
 plt.figure(figsize=(8, 5))
 plt.plot(score_df["K"], score_df["silhouette"], marker="o")
 plt.axvline(final_k, linestyle=":", linewidth=1.5)
@@ -399,8 +820,10 @@ plt.savefig(
 plt.show()
 
 
+# ============================================================
+# 18. PCA 시각화
+# ============================================================
 
-# PCA 시각화
 plt.figure(figsize=(8, 6))
 
 for c in sorted(work_df["hier_cluster"].unique()):
@@ -426,7 +849,10 @@ plt.savefig(
 )
 plt.show()
 
-# Dendrogram
+
+# ============================================================
+# 19. Dendrogram
+# ============================================================
 
 linked = linkage(X_scaled, method="ward")
 
@@ -465,8 +891,10 @@ plt.savefig(
 plt.show()
 
 
+# ============================================================
+# 20. 대표 이미지 경로 찾기 함수
+# ============================================================
 
-# 15. 대표 이미지 경로 찾기 함수
 def resolve_image_path(image_dir, filename):
     """
     CSV의 filename과 실제 이미지 파일 연결
@@ -507,6 +935,11 @@ def resolve_image_path(image_dir, filename):
         return recursive_stem_matches[0]
 
     return None
+
+
+# ============================================================
+# 21. 대표 이미지 선택 및 복사
+# ============================================================
 
 rep_rows = []
 missing_files = []
@@ -589,10 +1022,29 @@ else:
     print("모든 대표 이미지 복사 성공")
     print()
 
+
+# ============================================================
+# 22. 최종 출력
+# ============================================================
+
 print("=========================================")
 print("Hierarchical Clustering 분석 완료")
 print("K-Means와 동일한 의미 체계로 label 정렬 완료")
-print("Cluster 0 = 세정맥 우세 비대칭형")
-print("Cluster 1 = 전반적 확장형")
-print("Cluster 2 = 소직경 균형형")
+
+if final_k == 3:
+    print("Cluster 0 = 세정맥 우세 비대칭형")
+    print("Cluster 1 = 전반적 확장형")
+    print("Cluster 2 = 소직경 균형형")
+else:
+    print("final_k가 3이 아니므로 cluster 의미는 별도 해석 필요")
+
+print("Kruskal-Wallis 검정 완료")
+print("Effect size 계산 완료")
+
+if SCIPOSTHOCS_AVAILABLE:
+    print("Dunn post-hoc test 완료")
+else:
+    print("Dunn post-hoc test는 scikit-posthocs 미설치로 건너뜀")
+
+print("Cluster-wise boxplot 저장 완료")
 print("=========================================")
