@@ -282,9 +282,9 @@ if final_k == 3:
 
     work_df["cluster_type"] = work_df["cluster"].map(
         {
-            0: "venous_dominant_asymmetric",
-            1: "global_enlargement",
-            2: "small_balanced",
+            0: "Asymmetric",
+            1: "Dilated",
+            2: "Blanced",
         }
     )
 
@@ -709,7 +709,7 @@ for c in sorted(work_df["cluster"].unique()):
 
 plt.xlabel(f"PC1 ({pca.explained_variance_ratio_[0] * 100:.1f}%)")
 plt.ylabel(f"PC2 ({pca.explained_variance_ratio_[1] * 100:.1f}%)")
-plt.title(f"PCA of K-Means Clustering Results (K={final_k})")
+#plt.title(f"PCA of K-Means Clustering Results (K={final_k})")
 plt.legend()
 plt.grid(alpha=0.3, linestyle=":")
 plt.tight_layout()
