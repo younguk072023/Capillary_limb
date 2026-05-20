@@ -1,5 +1,6 @@
 """
 Hierarchical Clustering + Kruskal-Wallis + Effect Size + Dunn Post-hoc + Boxplot
+Times New Roman figure version
 """
 
 import os
@@ -23,8 +24,54 @@ from sklearn.metrics import (
 from scipy.cluster.hierarchy import linkage, dendrogram
 from scipy.stats import kruskal
 
+# ============================================================
+# 0. 논문용 공통 폰트 설정
+# ============================================================
+
+plt.rcParams["font.family"] = "Times New Roman"
+plt.rcParams["mathtext.fontset"] = "stix"
+plt.rcParams["axes.unicode_minus"] = False
+plt.rcParams["font.size"] = 11
+plt.rcParams["axes.labelsize"] = 13
+plt.rcParams["axes.titlesize"] = 15
+plt.rcParams["xtick.labelsize"] = 11
+plt.rcParams["ytick.labelsize"] = 11
+plt.rcParams["legend.fontsize"] = 11
+
+
+def apply_times_new_roman(ax, label_size=13, tick_size=11, title_size=15, bold_label=True):
+    """
+    matplotlib axis에 Times New Roman 폰트 강제 적용
+    """
+    fontweight = "bold" if bold_label else "normal"
+
+    ax.xaxis.label.set_fontname("Times New Roman")
+    ax.yaxis.label.set_fontname("Times New Roman")
+    ax.xaxis.label.set_fontsize(label_size)
+    ax.yaxis.label.set_fontsize(label_size)
+    ax.xaxis.label.set_fontweight(fontweight)
+    ax.yaxis.label.set_fontweight(fontweight)
+
+    ax.title.set_fontname("Times New Roman")
+    ax.title.set_fontsize(title_size)
+    ax.title.set_fontweight("bold")
+
+    for tick in ax.get_xticklabels():
+        tick.set_fontname("Times New Roman")
+        tick.set_fontsize(tick_size)
+
+    for tick in ax.get_yticklabels():
+        tick.set_fontname("Times New Roman")
+        tick.set_fontsize(tick_size)
+
+    legend = ax.get_legend()
+    if legend is not None:
+        for text in legend.get_texts():
+            text.set_fontname("Times New Roman")
+            text.set_fontsize(tick_size)
+
+
 # Dunn post-hoc test용 패키지
-# 설치가 안 되어 있으면 Dunn test만 건너뜀
 try:
     import scikit_posthocs as sp
     SCIPOSTHOCS_AVAILABLE = True
@@ -116,16 +163,13 @@ if len(work_df) < 3:
 
 eps = 1e-6
 
-# loop_length를 분석용 이름으로 통일
 work_df["loop_diameter"] = work_df["loop_length"]
 
-# 세정맥 / 세동맥 비율
 work_df["va_ratio"] = (
     work_df["venous_diameter"] /
     (work_df["arterial_diameter"] + eps)
 )
 
-# 전체 직경 평균
 work_df["avg_diameter3"] = (
     work_df["arterial_diameter"] +
     work_df["venous_diameter"] +
@@ -232,8 +276,6 @@ print()
 
 score_df.to_csv(score_csv, index=False, encoding="utf-8-sig")
 
-
-# silhouette 최고 K 선택
 best_k = int(
     score_df
     .sort_values("silhouette", ascending=False)
@@ -258,17 +300,12 @@ hier_model = AgglomerativeClustering(
     linkage="ward"
 )
 
-# 원래 계층적 군집 번호 저장
 work_df["hier_cluster_raw"] = hier_model.fit_predict(X_scaled)
 
 
 # ============================================================
 # 9. K=3일 경우 군집 의미 재매핑
 # ============================================================
-
-# 0 = 세정맥 우세 비대칭형
-# 1 = 전반적 확장형
-# 2 = 소직경 균형형
 
 if final_k == 3:
     raw_summary = (
@@ -277,19 +314,11 @@ if final_k == 3:
         .mean()
     )
 
-    # 1) 세정맥 우세 비대칭형:
-    # V/A ratio가 가장 큰 군집
     venous_dominant_raw = raw_summary["va_ratio"].idxmax()
 
-    # 나머지 군집
     remaining_summary = raw_summary.drop(index=venous_dominant_raw)
 
-    # 2) 전반적 확장형:
-    # 평균 직경이 가장 큰 군집
     enlarged_raw = remaining_summary["avg_diameter3"].idxmax()
-
-    # 3) 소직경 균형형:
-    # 평균 직경이 가장 작은 군집
     small_balanced_raw = remaining_summary["avg_diameter3"].idxmin()
 
     label_map = {
@@ -317,8 +346,6 @@ if final_k == 3:
     print()
 
 else:
-    # K=3이 아니면 자동 의미 매핑은 하지 않음
-    # K=4 이상은 중간 균형형 등 추가 군집이 생기므로 별도 해석 필요
     work_df["hier_cluster"] = work_df["hier_cluster_raw"]
     work_df["hier_cluster_type"] = "not_mapped"
 
@@ -427,14 +454,6 @@ if final_k == 3:
 # ============================================================
 # 12. Kruskal-Wallis Test
 # ============================================================
-# 목적:
-# 군집별로 arterial_diameter, venous_diameter, loop_diameter,
-# va_ratio, avg_diameter3 값이 통계적으로 다른지 확인
-#
-# 해석:
-# p < 0.05이면 해당 feature는 군집 간 유의한 차이가 있다고 해석 가능
-# 여러 feature를 동시에 검정하므로 Bonferroni 보정 p-value도 같이 저장
-# ============================================================
 
 cluster_col = "hier_cluster"
 
@@ -451,7 +470,6 @@ for feature in feature_cols:
         groups.append(values)
         group_sizes[f"cluster_{c}_n"] = len(values)
 
-    # 군집이 2개 이상이고, 각 군집에 값이 있어야 검정 가능
     if len(groups) < 2 or any(len(g) == 0 for g in groups):
         print(f"{feature}: 검정 불가 - 군집 수 또는 샘플 수 부족")
         continue
@@ -478,8 +496,6 @@ for feature in feature_cols:
 kruskal_df = pd.DataFrame(kruskal_rows)
 
 if len(kruskal_df) > 0:
-    # Bonferroni correction
-    # 여러 feature를 동시에 검정하므로 단순 보정값을 함께 제시
     kruskal_df["p_bonferroni"] = (
         kruskal_df["p_value"] * len(kruskal_df)
     ).clip(upper=1.0)
@@ -487,17 +503,6 @@ if len(kruskal_df) > 0:
     kruskal_df["significant_bonferroni_0.05"] = (
         kruskal_df["p_bonferroni"] < 0.05
     )
-
-    # ========================================================
-    # 12-1. Kruskal-Wallis effect size: epsilon squared
-    # ========================================================
-    # 목적:
-    # p-value가 유의한지뿐 아니라 차이의 크기도 확인
-    #
-    # epsilon_squared 해석:
-    # 0에 가까움: 군집 차이 작음
-    # 1에 가까움: 군집 차이 큼
-    # ========================================================
 
     n_total = len(work_df)
     k_groups = work_df["hier_cluster"].nunique()
@@ -538,15 +543,6 @@ else:
 # ============================================================
 # 13. Dunn Post-hoc Test
 # ============================================================
-# 목적:
-# Kruskal-Wallis에서 유의한 feature에 대해
-# 어느 군집끼리 차이가 나는지 확인
-#
-# 예:
-# Cluster 0 vs Cluster 1
-# Cluster 0 vs Cluster 2
-# Cluster 1 vs Cluster 2
-# ============================================================
 
 dunn_summary_rows = []
 
@@ -565,7 +561,6 @@ if len(kruskal_df) > 0 and SCIPOSTHOCS_AVAILABLE:
 
         p_val = matched.values[0]
 
-        # Bonferroni 보정 후 유의하지 않으면 Dunn 생략
         if p_val >= 0.05:
             print(f"{feature}: Bonferroni 보정 후 유의하지 않아 Dunn test 생략")
             continue
@@ -641,15 +636,11 @@ else:
 # ============================================================
 # 14. Cluster-wise Boxplot
 # ============================================================
-# 목적:
-# 군집별 feature 분포를 그림으로 확인
-# 논문 Figure 후보로 사용 가능
-# ============================================================
 
 print("=== Cluster-wise boxplot 저장 ===")
 
 for feature in feature_cols:
-    plt.figure(figsize=(7, 5))
+    fig, ax = plt.subplots(figsize=(7, 5))
 
     sorted_clusters = sorted(work_df["hier_cluster"].unique())
 
@@ -670,16 +661,19 @@ for feature in feature_cols:
         else:
             label_names.append(f"Cluster {c}")
 
-    plt.boxplot(
+    ax.boxplot(
         data_to_plot,
         tick_labels=label_names,
         showfliers=False
     )
 
-    plt.xlabel("Cluster")
-    plt.ylabel(feature)
-    plt.title(f"{feature} by cluster")
-    plt.grid(alpha=0.3, linestyle=":")
+    ax.set_xlabel("Cluster")
+    ax.set_ylabel(feature)
+    ax.set_title(f"{feature} by cluster")
+    ax.grid(alpha=0.3, linestyle=":")
+
+    apply_times_new_roman(ax)
+
     plt.tight_layout()
 
     save_path = os.path.join(
@@ -687,7 +681,7 @@ for feature in feature_cols:
         f"boxplot_{feature}_K{final_k}.png"
     )
 
-    plt.savefig(save_path, dpi=300)
+    plt.savefig(save_path, dpi=300, bbox_inches="tight")
     plt.show()
 
     print(f"Boxplot 저장: {os.path.abspath(save_path)}")
@@ -697,9 +691,6 @@ print()
 
 # ============================================================
 # 15. 군집 해석용 통합 요약표 저장
-# ============================================================
-# 목적:
-# 논문 Results 표로 쓰기 쉽게 평균, 표준편차, 샘플 수, 군집명 통합
 # ============================================================
 
 cluster_summary_mean = (
@@ -777,45 +768,51 @@ print()
 # 17. K별 평가 지표 그래프 저장
 # ============================================================
 
-plt.figure(figsize=(8, 5))
-plt.plot(score_df["K"], score_df["silhouette"], marker="o")
-plt.axvline(final_k, linestyle=":", linewidth=1.5)
-plt.xlabel("Number of clusters (K)")
-plt.ylabel("Silhouette score")
-plt.title("Hierarchical Clustering: Silhouette Score by K")
-plt.grid(alpha=0.3, linestyle=":")
+fig, ax = plt.subplots(figsize=(8, 5))
+ax.plot(score_df["K"], score_df["silhouette"], marker="o")
+ax.axvline(final_k, linestyle=":", linewidth=1.5)
+ax.set_xlabel("Number of clusters (K)")
+ax.set_ylabel("Silhouette score")
+ax.set_title("Hierarchical Clustering: Silhouette Score by K")
+ax.grid(alpha=0.3, linestyle=":")
+apply_times_new_roman(ax)
 plt.tight_layout()
 plt.savefig(
     os.path.join(result_dir, "hierarchical_silhouette_by_k.png"),
-    dpi=300
+    dpi=300,
+    bbox_inches="tight"
 )
 plt.show()
 
-plt.figure(figsize=(8, 5))
-plt.plot(score_df["K"], score_df["calinski_harabasz"], marker="o")
-plt.axvline(final_k, linestyle=":", linewidth=1.5)
-plt.xlabel("Number of clusters (K)")
-plt.ylabel("Calinski-Harabasz score")
-plt.title("Hierarchical Clustering: Calinski-Harabasz Score by K")
-plt.grid(alpha=0.3, linestyle=":")
+fig, ax = plt.subplots(figsize=(8, 5))
+ax.plot(score_df["K"], score_df["calinski_harabasz"], marker="o")
+ax.axvline(final_k, linestyle=":", linewidth=1.5)
+ax.set_xlabel("Number of clusters (K)")
+ax.set_ylabel("Calinski-Harabasz score")
+ax.set_title("Hierarchical Clustering: Calinski-Harabasz Score by K")
+ax.grid(alpha=0.3, linestyle=":")
+apply_times_new_roman(ax)
 plt.tight_layout()
 plt.savefig(
     os.path.join(result_dir, "hierarchical_calinski_by_k.png"),
-    dpi=300
+    dpi=300,
+    bbox_inches="tight"
 )
 plt.show()
 
-plt.figure(figsize=(8, 5))
-plt.plot(score_df["K"], score_df["davies_bouldin"], marker="o")
-plt.axvline(final_k, linestyle=":", linewidth=1.5)
-plt.xlabel("Number of clusters (K)")
-plt.ylabel("Davies-Bouldin score")
-plt.title("Hierarchical Clustering: Davies-Bouldin Score by K")
-plt.grid(alpha=0.3, linestyle=":")
+fig, ax = plt.subplots(figsize=(8, 5))
+ax.plot(score_df["K"], score_df["davies_bouldin"], marker="o")
+ax.axvline(final_k, linestyle=":", linewidth=1.5)
+ax.set_xlabel("Number of clusters (K)")
+ax.set_ylabel("Davies-Bouldin score")
+ax.set_title("Hierarchical Clustering: Davies-Bouldin Score by K")
+ax.grid(alpha=0.3, linestyle=":")
+apply_times_new_roman(ax)
 plt.tight_layout()
 plt.savefig(
     os.path.join(result_dir, "hierarchical_davies_by_k.png"),
-    dpi=300
+    dpi=300,
+    bbox_inches="tight"
 )
 plt.show()
 
@@ -824,12 +821,12 @@ plt.show()
 # 18. PCA 시각화
 # ============================================================
 
-plt.figure(figsize=(8, 6))
+fig, ax = plt.subplots(figsize=(8, 6))
 
 for c in sorted(work_df["hier_cluster"].unique()):
     sub = work_df[work_df["hier_cluster"] == c]
 
-    plt.scatter(
+    ax.scatter(
         sub["PC1"],
         sub["PC2"],
         alpha=0.7,
@@ -837,15 +834,19 @@ for c in sorted(work_df["hier_cluster"].unique()):
         s=30
     )
 
-plt.xlabel(f"PC1 ({pca.explained_variance_ratio_[0] * 100:.1f}%)")
-plt.ylabel(f"PC2 ({pca.explained_variance_ratio_[1] * 100:.1f}%)")
-plt.title(f"PCA of Hierarchical Clustering Results (K={final_k})")
-plt.legend()
-plt.grid(alpha=0.3, linestyle=":")
+ax.set_xlabel(f"PC1 ({pca.explained_variance_ratio_[0] * 100:.1f}%)")
+ax.set_ylabel(f"PC2 ({pca.explained_variance_ratio_[1] * 100:.1f}%)")
+ax.set_title(f"PCA of Hierarchical Clustering Results (K={final_k})")
+ax.legend()
+ax.grid(alpha=0.3, linestyle=":")
+
+apply_times_new_roman(ax)
+
 plt.tight_layout()
 plt.savefig(
     os.path.join(result_dir, f"hierarchical_pca_cluster_K{final_k}.png"),
-    dpi=300
+    dpi=300,
+    bbox_inches="tight"
 )
 plt.show()
 
@@ -856,37 +857,79 @@ plt.show()
 
 linked = linkage(X_scaled, method="ward")
 
-plt.figure(figsize=(14, 7))
+# ------------------------------------------------------------
+# 19-1. Full dendrogram
+# ------------------------------------------------------------
+
+fig, ax = plt.subplots(figsize=(14, 7))
+
 dendrogram(
     linked,
     no_labels=True,
-    color_threshold=None
+    color_threshold=None,
+    ax=ax
 )
-plt.title("Hierarchical Clustering Dendrogram (Ward linkage)")
-plt.xlabel("Samples")
-plt.ylabel("Distance")
+
+# 제목을 쓰고 싶으면 아래 주석 해제
+# ax.set_title("Hierarchical Clustering Dendrogram (Ward linkage)")
+
+ax.set_xlabel("Samples")
+ax.set_ylabel("Linkage Distance")
+
+apply_times_new_roman(
+    ax,
+    label_size=13,
+    tick_size=11,
+    title_size=15,
+    bold_label=True
+)
+
+ax.grid(False)
+
 plt.tight_layout()
 plt.savefig(
     os.path.join(result_dir, "hierarchical_dendrogram_full.png"),
-    dpi=300
+    dpi=300,
+    bbox_inches="tight"
 )
 plt.show()
 
-plt.figure(figsize=(12, 6))
+# ------------------------------------------------------------
+# 19-2. Truncated dendrogram
+# ------------------------------------------------------------
+
+fig, ax = plt.subplots(figsize=(12, 6))
+
 dendrogram(
     linked,
     truncate_mode="lastp",
     p=30,
     show_leaf_counts=True,
-    color_threshold=None
+    color_threshold=None,
+    ax=ax
 )
-plt.title("Truncated Hierarchical Dendrogram (last 30 merged clusters)")
-plt.xlabel("Merged clusters")
-plt.ylabel("Distance")
+
+# 제목을 쓰고 싶으면 아래 주석 해제
+# ax.set_title("Truncated Hierarchical Dendrogram")
+
+ax.set_xlabel("Samples")
+ax.set_ylabel("Linkage Distance")
+
+apply_times_new_roman(
+    ax,
+    label_size=13,
+    tick_size=11,
+    title_size=15,
+    bold_label=True
+)
+
+ax.grid(False)
+
 plt.tight_layout()
 plt.savefig(
     os.path.join(result_dir, "hierarchical_dendrogram_truncated.png"),
-    dpi=300
+    dpi=300,
+    bbox_inches="tight"
 )
 plt.show()
 
@@ -896,12 +939,6 @@ plt.show()
 # ============================================================
 
 def resolve_image_path(image_dir, filename):
-    """
-    CSV의 filename과 실제 이미지 파일 연결
-    - image_dir 바로 아래에서 먼저 찾음
-    - 확장자가 없으면 일반 이미지 확장자를 붙여서 찾음
-    - 하위 폴더까지 재귀적으로 검색함
-    """
     filename = str(filename).strip()
 
     exact_path = os.path.join(image_dir, filename)
@@ -952,7 +989,6 @@ for c in sorted(work_df["hier_cluster"].unique()):
     if len(cluster_idxs) == 0:
         continue
 
-    # 해당 cluster의 표준화 feature 평균을 중심처럼 사용
     cluster_vectors = X_scaled[cluster_idxs]
     center = cluster_vectors.mean(axis=0)
 
@@ -963,7 +999,6 @@ for c in sorted(work_df["hier_cluster"].unique()):
         dist = np.linalg.norm(vec - center)
         dist_list.append((idx, dist))
 
-    # 중심에 가까운 5개 선택
     dist_list = sorted(dist_list, key=lambda x: x[1])[:5]
 
     cluster_dir = os.path.join(rep_copy_root, f"hier_cluster_{c}")
