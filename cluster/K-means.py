@@ -870,3 +870,55 @@ else:
 
 print("Cluster-wise boxplot 저장 완료")
 print("=========================================")
+
+# =====================================================================
+# 3차원 산점도 시각화 (X: Arterial, Y: Venous, Z: Loop)
+# =====================================================================
+print("=== 3D Scatter plot 저장 ===")
+
+fig = plt.figure(figsize=(10, 8))
+ax = fig.add_subplot(111, projection='3d')
+
+for c in sorted(work_df["cluster"].unique()):
+    sub = work_df[work_df["cluster"] == c]
+
+    # 라벨링 설정
+    if final_k == 3 and "cluster_type" in work_df.columns:
+        label_name = sub["cluster_type"].iloc[0]
+        legend_label = f"Cluster {c}: {label_name}"
+    else:
+        legend_label = f"Cluster {c}"
+
+    # 3D 산점도 그리기
+    ax.scatter(
+        sub["arterial_diameter"],
+        sub["venous_diameter"],
+        sub["loop_diameter"],
+        alpha=0.7,
+        s=40,
+        label=legend_label,
+        edgecolors='w',       # 점의 테두리를 하얗게 주어 겹칠 때 구분이 잘 되게 함
+        linewidth=0.5
+    )
+
+# 축 이름 설정
+ax.set_xlabel("Arterial Diameter (px)", labelpad=10)
+ax.set_ylabel("Venous Diameter (px)", labelpad=10)
+ax.set_zlabel("Loop Diameter (px)", labelpad=10)
+# ax.set_title(f"3D Scatter Plot of Capillary Clusters (K={final_k})") # 필요 시 주석 해제
+
+# 시야각(Viewing angle) 조절 
+# elev: 위아래 각도 (기본 30도)
+# azim: 좌우 회전 각도 (기본 -60도)
+# 그래프가 저장된 후, 군집이 가장 잘 나뉘어 보이는 각도를 찾아 이 숫자를 변경하시면 됩니다.
+ax.view_init(elev=20, azim=45) 
+
+plt.legend()
+plt.tight_layout()
+
+save_path_3d = os.path.join(result_dir, f"kmeans_3d_scatter_K{final_k}.png")
+plt.savefig(save_path_3d, dpi=400)
+plt.show()
+
+print(f"3D Scatter plot 저장 완료: {os.path.abspath(save_path_3d)}")
+print()
