@@ -35,9 +35,9 @@ except ImportError:
 # 경로 설정
 # =========================================================
 MANUAL_CSV = r"C:\Users\park_younguk\Desktop\analysis\total\image\passivity.csv"
-ALGO_CSV   = r"C:\Users\park_younguk\Desktop\effi_corr\Total\effi_algorithm.csv"
+ALGO_CSV   = r"C:\Users\park_younguk\Desktop\effi_corr\Total\algorithm_alpha_1_3.csv"
 
-SAVE_DIR   = r"C:\Users\park_younguk\Desktop\analysis\total\image\reliability_sep_final_like_example"
+SAVE_DIR   = r"C:\Users\park_younguk\Desktop\analysis\total\image\reliability_alpha_1_3"
 
 os.makedirs(SAVE_DIR, exist_ok=True)
 

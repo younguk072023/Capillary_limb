@@ -17,8 +17,8 @@ import pandas as pd
 # ================= 설정 영역 =================
 BASE_DIR = r"C:\Users\park_younguk\Desktop\analysis"
 LENGTH_CSV = os.path.join(BASE_DIR, "efficientNet-b2.csv")
-MEASURE_CSV = os.path.join(BASE_DIR, "effi_mask", "final_mtl_algo_measurement.csv")
-OUTPUT_CSV = os.path.join(BASE_DIR, "limb_total.csv")
+MEASURE_CSV = os.path.join(BASE_DIR, "effi_mask", "final_mtl_algo_measurement_alpha_1_1.csv")
+OUTPUT_CSV = os.path.join(BASE_DIR, "limb_total_1_1.csv")
 # =============================================
 
 

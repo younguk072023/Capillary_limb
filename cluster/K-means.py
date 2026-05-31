@@ -36,7 +36,7 @@ except ImportError:
 
 
 # 기본 경로 설정
-csv_path = "limb_total.csv" # 각 직경이 정리되어있는 csv 파일
+csv_path = r"C:\Users\park_younguk\Desktop\analysis\limb_total.csv" # 각 직경이 정리되어있는 csv 파일
 image_dir = r"D:\usb\MTL_dataset\image" # 이미지 정리되어있는 파일
 
 result_dir = "kmeans_results"
@@ -690,14 +690,7 @@ plt.figure(figsize=(8, 6))
 for c in sorted(work_df["cluster"].unique()):
     sub = work_df[work_df["cluster"] == c]
 
-    if final_k == 3:
-        label_name = work_df.loc[
-            work_df["cluster"] == c,
-            "cluster_type"
-        ].iloc[0]
-        legend_label = f"Cluster {c}: {label_name}"
-    else:
-        legend_label = f"Cluster {c}"
+    legend_label = f"Cluster {c}"
 
     plt.scatter(
         sub["PC1"],

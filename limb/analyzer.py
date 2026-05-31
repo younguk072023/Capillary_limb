@@ -61,7 +61,7 @@ def get_stable_max_diameter_raycast(
     tangent_half_window=3,
     use_branch_ray_gate=True,
     # --- 유일한 튜닝 파라미터 ---
-    edt_ratio_max=1.5,          # raycast가 EDT 지름의 몇 배까지 허용할지
+    edt_ratio_max=1.1,          # raycast가 EDT 지름의 몇 배까지 허용할지
     max_diameter_px=None,       # (선택) 생리학적 상한. 모르면 None
 ):
     """

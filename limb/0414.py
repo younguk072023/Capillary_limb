@@ -13,10 +13,10 @@ from analyzer import analyze_single_image
 IMAGE_DIR = r"C:\Users\park_younguk\Desktop\analysis\effi_mask"
 KEYPOINT_CSV = r"C:\Users\park_younguk\Desktop\analysis\efficientNet-b2.csv"
 
-OUTPUT_CSV = os.path.join(IMAGE_DIR, "final_mtl_algo_measurement.csv")
-VISUAL_DIR = os.path.join(IMAGE_DIR, "algo_visual_check")
+OUTPUT_CSV = os.path.join(IMAGE_DIR, "final_mtl_algo_measurement_alpha_1_1.csv")
+VISUAL_DIR = os.path.join(IMAGE_DIR, "algo_visual_check_1_1")
 # [추가] 실패한 이미지만 따로 모을 폴더
-FAILED_DIR = os.path.join(IMAGE_DIR, "algo_failed_samples") 
+FAILED_DIR = os.path.join(IMAGE_DIR, "algo_failed_samples_1_1") 
 # =============================================
 
 def main():

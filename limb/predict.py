@@ -10,8 +10,8 @@ from analyzer import analyze_single_image
 # ================= 설정 영역 =================
 IMAGE_DIR = r"C:\Users\park_younguk\Desktop\effi_corr\Total"  
 KEYPOINT_CSV = r"C:\Users\park_younguk\Desktop\effi_corr\efficientNet-b2.csv"       
-OUTPUT_CSV = os.path.join(IMAGE_DIR, "algorithm.csv")
-VISUAL_DIR = os.path.join(IMAGE_DIR, "algorithm_croo")
+OUTPUT_CSV = os.path.join(IMAGE_DIR, "algorithm_alpha_1_1.csv")
+VISUAL_DIR = os.path.join(IMAGE_DIR, "algorithm_visual_alpha_1_1")
 
 def main():
     print("[좌우 고정 모드] 알고리즘 자동 측정을 시작합니다...")
