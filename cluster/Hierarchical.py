@@ -51,7 +51,7 @@ def apply_times_new_roman(ax, label_size=13, tick_size=11, title_size=15, bold_l
     ax.yaxis.label.set_fontsize(label_size)
     ax.xaxis.label.set_fontweight(fontweight)
     ax.yaxis.label.set_fontweight(fontweight)
-
+    
     ax.title.set_fontname("Times New Roman")
     ax.title.set_fontsize(title_size)
     ax.title.set_fontweight("bold")

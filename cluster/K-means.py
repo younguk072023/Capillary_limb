@@ -201,6 +201,7 @@ for k in k_list:    #첫 번쨰 K-means는 어떤 K가 좋은지 비교하기 �
     )
 
     labels = model.fit_predict(X_scaled)
+    inertia = model.inertia_
     sil = silhouette_score(X_scaled, labels)
     ch = calinski_harabasz_score(X_scaled, labels)
     db = davies_bouldin_score(X_scaled, labels)
@@ -208,6 +209,7 @@ for k in k_list:    #첫 번쨰 K-means는 어떤 K가 좋은지 비교하기 �
     score_rows.append(
         {
             "K": k,
+            "inertia": inertia,
             "silhouette": sil,
             "calinski_harabasz": ch,
             "davies_bouldin": db
@@ -640,6 +642,23 @@ print(f"K 비교 점수 저장: {os.path.abspath(score_csv)}")
 print()
 
 # K별 평가 지표 그래프 저장
+
+# Elbow plot: inertia by K
+plt.figure(figsize=(8, 5))
+plt.plot(score_df["K"], score_df["inertia"], marker="o")
+plt.axvline(final_k, linestyle=":", linewidth=1.5)
+plt.xlabel("Number of clusters (K)")
+plt.ylabel("Inertia")
+plt.title("K-Means: Elbow Curve")
+plt.grid(alpha=0.3, linestyle=":")
+plt.tight_layout()
+plt.savefig(
+    os.path.join(result_dir, "kmeans_elbow_inertia_by_k.png"),
+    dpi=300
+)
+plt.show()
+
+
 plt.figure(figsize=(8, 5))
 plt.plot(score_df["K"], score_df["silhouette"], marker="o")
 plt.axvline(final_k, linestyle=":", linewidth=1.5)
@@ -915,3 +934,356 @@ plt.show()
 
 print(f"3D Scatter plot 저장 완료: {os.path.abspath(save_path_3d)}")
 print()
+
+"""
+K-Means Clustering + Kruskal-Wallis + Dunn Post-hoc + t-SNE/UMAP + RF & SHAP(XAI)
+"""
+
+import os
+os.environ["OMP_NUM_THREADS"] = "6"
+
+import glob
+import shutil
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
+from sklearn.cluster import KMeans
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import (
+    silhouette_score,
+    calinski_harabasz_score,
+    davies_bouldin_score
+)
+
+from scipy.stats import kruskal
+
+# 1. 추가 패키지 확인 (Dunn, UMAP, SHAP)
+try:
+    import scikit_posthocs as sp
+    SCIPOSTHOCS_AVAILABLE = True
+except ImportError:
+    SCIPOSTHOCS_AVAILABLE = False
+    print("scikit-posthocs 미설치. (pip install scikit-posthocs)")
+
+try:
+    import umap
+    UMAP_AVAILABLE = True
+except ImportError:
+    UMAP_AVAILABLE = False
+    print("umap-learn 미설치. UMAP 시각화를 건너뜁니다. (pip install umap-learn)")
+
+try:
+    import shap
+    SHAP_AVAILABLE = True
+except ImportError:
+    SHAP_AVAILABLE = False
+    print("shap 미설치. XAI 분석을 건너뜁니다. (pip install shap)")
+
+print()
+
+
+# 2. 기본 경로 설정
+csv_path = r"C:\Users\park_younguk\Desktop\analysis\limb_total.csv"
+image_dir = r"D:\usb\MTL_dataset\image"
+
+result_dir = "kmeans_advanced_results"
+os.makedirs(result_dir, exist_ok=True)
+
+rep_copy_root = os.path.join(result_dir, "kmeans_representative_images")
+out_csv = os.path.join(result_dir, "limb_total_kmeans_clustered.csv")
+summary_csv = os.path.join(result_dir, "limb_total_kmeans_cluster_summary.csv")
+std_csv = os.path.join(result_dir, "limb_total_kmeans_cluster_std.csv")
+score_csv = os.path.join(result_dir, "limb_total_kmeans_k_scores.csv")
+rep_csv = os.path.join(result_dir, "limb_total_kmeans_representatives.csv")
+pca_loading_csv = os.path.join(result_dir, "limb_total_kmeans_pca_loadings.csv")
+rf_importance_csv = os.path.join(result_dir, "limb_total_rf_feature_importance.csv")
+
+kruskal_csv = os.path.join(result_dir, "limb_total_kmeans_kruskal.csv")
+dunn_summary_csv = os.path.join(result_dir, "limb_total_kmeans_dunn_summary.csv")
+dunn_dir = os.path.join(result_dir, "dunn_posthoc")
+boxplot_dir = os.path.join(result_dir, "cluster_boxplots")
+xai_dir = os.path.join(result_dir, "xai_plots")
+
+os.makedirs(dunn_dir, exist_ok=True)
+os.makedirs(boxplot_dir, exist_ok=True)
+os.makedirs(xai_dir, exist_ok=True)
+
+
+# 3. CSV 로드 및 데이터 전처리
+df = pd.read_csv(csv_path, encoding="utf-8-sig")
+df.columns = df.columns.str.strip().str.replace("\ufeff", "", regex=False)
+
+required_cols = ["filename", "loop_length", "arterial_diameter", "venous_diameter"]
+missing = [c for c in required_cols if c not in df.columns]
+if missing:
+    raise ValueError(f"필수 컬럼 누락: {missing}")
+
+work_df = df[required_cols].copy()
+for c in ["loop_length", "arterial_diameter", "venous_diameter"]:
+    work_df[c] = pd.to_numeric(work_df[c], errors="coerce")
+
+work_df = work_df.dropna(subset=required_cols).reset_index(drop=True)
+
+if len(work_df) < 3:
+    raise ValueError("유효 샘플 수가 부족합니다.")
+
+# Feature Engineering
+eps = 1e-6
+work_df["loop_diameter"] = work_df["loop_length"]
+work_df["va_ratio"] = work_df["venous_diameter"] / (work_df["arterial_diameter"] + eps)
+work_df["avg_diameter3"] = (work_df["arterial_diameter"] + work_df["venous_diameter"] + work_df["loop_diameter"]) / 3.0
+
+feature_cols = ["arterial_diameter", "venous_diameter", "loop_diameter", "va_ratio", "avg_diameter3"]
+
+work_df = work_df.replace([np.inf, -np.inf], np.nan)
+work_df = work_df.dropna(subset=feature_cols).reset_index(drop=True)
+
+X = work_df[feature_cols].copy()
+
+# 표준화
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+
+
+# 4. 차원 축소 (PCA, t-SNE, UMAP)
+print("=== 차원 축소 (PCA, t-SNE, UMAP) 진행 중 ===")
+# PCA
+pca = PCA(n_components=2, random_state=42)
+X_pca = pca.fit_transform(X_scaled)
+work_df["PC1"] = X_pca[:, 0]
+work_df["PC2"] = X_pca[:, 1]
+pca_loading = pd.DataFrame(pca.components_.T, index=feature_cols, columns=["PC1_loading", "PC2_loading"])
+pca_loading.to_csv(pca_loading_csv, encoding="utf-8-sig")
+
+# t-SNE
+tsne = TSNE(n_components=2, random_state=42, init='pca', learning_rate='auto')
+X_tsne = tsne.fit_transform(X_scaled)
+work_df["tSNE1"] = X_tsne[:, 0]
+work_df["tSNE2"] = X_tsne[:, 1]
+
+# UMAP
+if UMAP_AVAILABLE:
+    reducer = umap.UMAP(n_components=2, random_state=42)
+    X_umap = reducer.fit_transform(X_scaled)
+    work_df["UMAP1"] = X_umap[:, 0]
+    work_df["UMAP2"] = X_umap[:, 1]
+print("차원 축소 완료.\n")
+
+
+# 5. K-Means K 비교 및 최적 K 선정
+max_k = min(7, len(work_df) - 1)
+k_list = [k for k in [2, 3, 4, 5, 6, 7] if k <= max_k]
+score_rows = []
+
+for k in k_list:
+    model = KMeans(n_clusters=k, random_state=42, n_init=20)
+    labels = model.fit_predict(X_scaled)
+    score_rows.append({
+        "K": k,
+        "inertia": model.inertia_,
+        "silhouette": silhouette_score(X_scaled, labels),
+        "calinski_harabasz": calinski_harabasz_score(X_scaled, labels),
+        "davies_bouldin": davies_bouldin_score(X_scaled, labels)
+    })
+
+score_df = pd.DataFrame(score_rows)
+score_df.to_csv(score_csv, index=False, encoding="utf-8-sig")
+
+best_k = int(score_df.sort_values("silhouette", ascending=False).iloc[0]["K"])
+final_k = best_k
+
+final_model = KMeans(n_clusters=final_k, random_state=42, n_init=20)
+work_df["cluster_raw"] = final_model.fit_predict(X_scaled)
+
+if final_k == 3:
+    raw_summary = work_df.groupby("cluster_raw")[feature_cols].mean()
+    venous_dominant_raw = raw_summary["va_ratio"].idxmax()
+    remaining_summary = raw_summary.drop(index=venous_dominant_raw)
+    enlarged_raw = remaining_summary["avg_diameter3"].idxmax()
+    small_balanced_raw = remaining_summary["avg_diameter3"].idxmin()
+
+    label_map = {venous_dominant_raw: 0, enlarged_raw: 1, small_balanced_raw: 2}
+    work_df["cluster"] = work_df["cluster_raw"].map(label_map).astype(int)
+    work_df["cluster_type"] = work_df["cluster"].map({0: "Asymmetric", 1: "Dilated", 2: "Balanced"})
+else:
+    work_df["cluster"] = work_df["cluster_raw"]
+    work_df["cluster_type"] = "not_mapped"
+
+cluster_summary = work_df.groupby("cluster")[feature_cols].mean().round(3)
+cluster_std = work_df.groupby("cluster")[feature_cols].std().round(3)
+
+
+# 6. 통계 분석 (Kruskal-Wallis & Dunn)
+kruskal_rows = []
+for feature in feature_cols:
+    groups = [work_df.loc[work_df["cluster"] == c, feature].dropna() for c in sorted(work_df["cluster"].unique())]
+    if len(groups) < 2: continue
+    h_stat, p_value = kruskal(*groups)
+    kruskal_rows.append({"feature": feature, "H_statistic": h_stat, "p_value": p_value})
+
+kruskal_df = pd.DataFrame(kruskal_rows)
+if len(kruskal_df) > 0:
+    kruskal_df["p_bonferroni"] = (kruskal_df["p_value"] * len(kruskal_df)).clip(upper=1.0)
+    kruskal_df.to_csv(kruskal_csv, index=False, encoding="utf-8-sig")
+
+if SCIPOSTHOCS_AVAILABLE and len(kruskal_df) > 0:
+    dunn_summary_rows = []
+    for feature in feature_cols:
+        matched = kruskal_df.loc[kruskal_df["feature"] == feature, "p_bonferroni"]
+        if len(matched) == 0 or matched.values[0] >= 0.05: continue
+        dunn_result = sp.posthoc_dunn(work_df, val_col=feature, group_col="cluster", p_adjust="bonferroni")
+        dunn_result.to_csv(os.path.join(dunn_dir, f"dunn_{feature}_K{final_k}.csv"), encoding="utf-8-sig")
+
+
+# 7. XAI 분석 (Random Forest + SHAP)
+print("=== XAI (Random Forest + SHAP) 분석 시작 ===")
+if SHAP_AVAILABLE:
+    # 스케일링 전 원본 변수를 사용하여 의학적 해석을 용이하게 함
+    rf = RandomForestClassifier(n_estimators=100, random_state=42)
+    rf.fit(X, work_df["cluster"])
+    
+    # Feature Importance 저장
+    importances = pd.DataFrame({
+        "Feature": feature_cols,
+        "Importance": rf.feature_importances_
+    }).sort_values(by="Importance", ascending=False)
+    importances.to_csv(rf_importance_csv, index=False, encoding="utf-8-sig")
+    print("\n[Random Forest Feature Importance]")
+    print(importances.to_string(index=False))
+
+    # SHAP 분석
+    # === 이 부분을 기존 7번 파트 SHAP 시각화 코드와 교체하세요 ===
+    
+    # SHAP 분석
+    explainer = shap.TreeExplainer(rf)
+    shap_values = explainer.shap_values(X)
+
+    # 1. 기존 막대그래프 (필요하면 남겨두고 필요 없으면 지우셔도 됩니다)
+    plt.figure(figsize=(8, 6))
+    shap.summary_plot(shap_values, X, plot_type="bar", show=False)
+    plt.title("SHAP Feature Importance (Bar - All Clusters)")
+    plt.tight_layout()
+    plt.savefig(os.path.join(xai_dir, "shap_summary_bar.png"), dpi=300)
+    plt.close()
+
+    # 2. 새로 추가: 올려주신 사진처럼 예쁜 '점 그래프 (Beeswarm)' 생성
+    # 다중 분류이므로 각 군집(Cluster)별로 따로 그려야 에러가 안 나고 예쁘게 나옵니다.
+    # 2. 예쁜 점 그래프 (Beeswarm) 추가 생성
+    classes = sorted(work_df["cluster"].unique())
+    
+    for c_idx in classes:
+        plt.figure(figsize=(8, 6))
+        
+        # SHAP 라이브러리 버전에 따른 데이터 구조 분기 처리 (에러 해결 핵심)
+        if isinstance(shap_values, list):
+            # 구버전 SHAP: 리스트 형태일 때
+            class_shap_vals = shap_values[c_idx]
+        else:
+            # 신버전 SHAP: 3차원 Numpy 배열 형태일 때 [samples, features, classes]
+            class_shap_vals = shap_values[:, :, c_idx]
+        
+        # 추출한 해당 군집의 SHAP 값으로 점 그래프 생성
+        shap.summary_plot(class_shap_vals, X, show=False) 
+        
+        plt.title(f"SHAP Summary (Dot) - Cluster {c_idx}")
+        plt.tight_layout()
+        
+        save_path = os.path.join(xai_dir, f"shap_summary_dot_Cluster{c_idx}.png")
+        plt.savefig(save_path, dpi=300, bbox_inches='tight') 
+        plt.close()
+        print(f"Cluster {c_idx} SHAP Dot Plot 저장 완료: {save_path}")
+else:
+    print("SHAP 모듈이 없어 XAI 분석 생략.\n")
+
+
+# 8. 시각화 (Boxplot, K-지표, 차원축소 2D, 3D 산점도)
+print("=== 시각화 이미지 저장 중 ===")
+# 차원 축소 2D 시각화 함수
+def plot_2d(x_col, y_col, title, filename):
+    plt.figure(figsize=(8, 6))
+    for c in sorted(work_df["cluster"].unique()):
+        sub = work_df[work_df["cluster"] == c]
+        label_name = f"Cluster {c}: {sub['cluster_type'].iloc[0]}" if final_k == 3 else f"Cluster {c}"
+        plt.scatter(sub[x_col], sub[y_col], alpha=0.7, label=label_name, s=30)
+    plt.xlabel(x_col)
+    plt.ylabel(y_col)
+    plt.title(title)
+    plt.legend()
+    plt.grid(alpha=0.3, linestyle=":")
+    plt.tight_layout()
+    plt.savefig(os.path.join(result_dir, filename), dpi=300)
+    plt.close()
+
+plot_2d("PC1", "PC2", f"PCA of K-Means (K={final_k})", f"kmeans_pca_K{final_k}.png")
+plot_2d("tSNE1", "tSNE2", f"t-SNE of K-Means (K={final_k})", f"kmeans_tsne_K{final_k}.png")
+if UMAP_AVAILABLE:
+    plot_2d("UMAP1", "UMAP2", f"UMAP of K-Means (K={final_k})", f"kmeans_umap_K{final_k}.png")
+
+# 3D 산점도
+fig = plt.figure(figsize=(10, 8))
+ax = fig.add_subplot(111, projection='3d')
+for c in sorted(work_df["cluster"].unique()):
+    sub = work_df[work_df["cluster"] == c]
+    label_name = f"Cluster {c}: {sub['cluster_type'].iloc[0]}" if final_k == 3 else f"Cluster {c}"
+    ax.scatter(sub["arterial_diameter"], sub["venous_diameter"], sub["loop_diameter"],
+               alpha=0.7, s=40, label=label_name, edgecolors='w', linewidth=0.5)
+ax.set_xlabel("Arterial Diameter (px)", labelpad=10)
+ax.set_ylabel("Venous Diameter (px)", labelpad=10)
+ax.set_zlabel("Loop Diameter (px)", labelpad=10)
+ax.view_init(elev=20, azim=45) 
+plt.legend()
+plt.tight_layout()
+plt.savefig(os.path.join(result_dir, f"kmeans_3d_scatter_K{final_k}.png"), dpi=400)
+plt.close()
+
+
+# 9. 결과 CSV 저장 및 대표 이미지 복사
+work_df.to_csv(out_csv, index=False, encoding="utf-8-sig")
+cluster_summary.to_csv(summary_csv, encoding="utf-8-sig")
+
+# 이미지 복사 로직 (기존과 동일)
+def resolve_image_path(img_dir, fname):
+    fname = str(fname).strip()
+    exact = os.path.join(img_dir, fname)
+    if os.path.exists(exact): return exact
+    stem, _ = os.path.splitext(fname)
+    for ext2 in [".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"]:
+        cand = os.path.join(img_dir, stem + ext2)
+        if os.path.exists(cand): return cand
+    matches = glob.glob(os.path.join(img_dir, "**", stem + ".*"), recursive=True)
+    if matches: return matches[0]
+    return None
+
+rep_rows = []
+for c in sorted(work_df["cluster"].unique()):
+    cluster_idxs = work_df[work_df["cluster"] == c].index.tolist()
+    if not cluster_idxs: continue
+    
+    center = X_scaled[cluster_idxs].mean(axis=0)
+    dist_list = sorted([(idx, np.linalg.norm(X_scaled[idx] - center)) for idx in cluster_idxs], key=lambda x: x[1])[:5]
+    
+    cluster_dir = os.path.join(rep_copy_root, f"kmeans_cluster_{c}")
+    os.makedirs(cluster_dir, exist_ok=True)
+    
+    for idx, dist in dist_list:
+        fname = work_df.loc[idx, "filename"]
+        img_path = resolve_image_path(image_dir, fname)
+        copied, reason = ("YES", "") if img_path else ("NO", "not_found")
+        if img_path: shutil.copy2(img_path, os.path.join(cluster_dir, os.path.basename(img_path)))
+        
+        rep_rows.append({
+            "cluster": c, "filename": fname, "distance": round(dist, 4), "copied": copied
+        })
+
+pd.DataFrame(rep_rows).to_csv(rep_csv, index=False, encoding="utf-8-sig")
+
+print("=========================================")
+print("분석 및 저장 완료!")
+print(f"- 군집/차원축소 결과 CSV: {out_csv}")
+print(f"- SHAP 요약 플롯 (XAI): {os.path.join(xai_dir, 'shap_summary_bar.png')}")
+print(f"- 2D/3D 시각화 이미지: {result_dir} 폴더 내 확인")
+print("=========================================")
