@@ -222,7 +222,7 @@ print("=== K-Means K 비교 점수 ===")
 print(score_df.to_string(index=False))
 print()
 
-score_df.to_csv(score_csv, index=False, encoding="utf-8-sig")
+score_df.to_csv(score_csv, index=False, encoding="utf-8-sig'")
 
 
 best_k = int(
