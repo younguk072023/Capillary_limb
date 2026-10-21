@@ -109,7 +109,7 @@ def save_viz_image_for_qc(image_name, result, output_folder):
     fig.tight_layout()
     
     # 이미지 이름과 동일하게 png로 저장
-    save_filename = os.path.splitext(image_name)[0] + ".png"
+    save_filename = os.path.splitext(os.path.basename(image_name))[0] + ".png"
     plt.savefig(os.path.join(output_folder, save_filename), bbox_inches="tight", pad_inches=0.1)
     
     plt.close(fig)
@@ -119,23 +119,25 @@ def save_viz_image_for_qc(image_name, result, output_folder):
 # =========================================================
 # 5. 메인 추출 함수 (CSV + Viz 통합)
 # =========================================================
-def export_csv_and_viz_for_qc(image_dir, csv_path, output_csv_name="capillary_measurements_for_qc.csv"):
-    df_keypoints = pd.read_csv(csv_path)
+def export_csv_and_viz_for_qc(image_dir, csv_path, output_csv_name="capillary_measurements_for_qc.csv",
+                              image_files=None, df_keypoints=None, viz_out_dir=None):
+    df_keypoints = pd.read_csv(csv_path) if df_keypoints is None else df_keypoints
     
     valid_ext = (".tif", ".tiff", ".png", ".jpg", ".jpeg", ".bmp")
-    image_files = sorted([f for f in os.listdir(image_dir) if f.lower().endswith(valid_ext)])
+    image_files = (list(image_files) if image_files is not None else
+                   sorted([f for f in os.listdir(image_dir) if f.lower().endswith(valid_ext)]))
     
     if len(image_files) == 0:
         print(f"❌ 이미지 파일이 없습니다: {image_dir}")
         return
 
     # 시각화 저장 폴더 생성
-    viz_out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "viz_for_qc")
+    viz_out_dir = viz_out_dir or os.path.join(os.path.dirname(os.path.abspath(__file__)), "viz_for_qc")
     os.makedirs(viz_out_dir, exist_ok=True)
 
     print(f"🚀 총 {len(image_files)}개 이미지 분석 시작")
     print(f"📁 [CSV] {output_csv_name}")
-    print(f"📁 [QC 이미지] viz_for_qc/ 폴더")
+    print(f"📁 [QC 이미지] {viz_out_dir}")
     print("="*60 + "\n")
     
     results_list = []
@@ -145,15 +147,33 @@ def export_csv_and_viz_for_qc(image_dir, csv_path, output_csv_name="capillary_me
     for img_name in tqdm(image_files, desc="Exporting Data & Viz"):
         img_path = os.path.join(image_dir, img_name)
         
+        # Retain one row per selected image, including extraction failures.
+        measurement = {
+            "Filename": os.path.basename(img_name), "Mask_Relative_Path": img_name,
+            "Status": "Failed", "Reason": "", "Loop_Diameter_px": np.nan,
+            "A_Diameter": np.nan, "A_L_x": np.nan, "A_L_y": np.nan,
+            "A_R_x": np.nan, "A_R_y": np.nan,
+            "V_Diameter": np.nan, "V_L_x": np.nan, "V_L_y": np.nan,
+            "V_R_x": np.nan, "V_R_y": np.nan,
+        }
+        point_rows = df_keypoints[df_keypoints["filename"].map(
+            lambda value: os.path.splitext(os.path.basename(str(value)))[0]) ==
+            os.path.splitext(os.path.basename(img_name))[0]]
+        if len(point_rows) == 1:
+            point = point_rows.iloc[0]
+            measurement["Loop_Diameter_px"] = float(np.hypot(
+                point["D_x"] - point["U_x"], point["D_y"] - point["U_y"]))
+        results_list.append(measurement)
         # 1. 단일 이미지 분석
         try:
             result = analyze_single_image(img_path, df_keypoints)
         except Exception as e:
             print(f"\n[ERR] {img_name} 분석 중 치명적 오류: {e}")
+            measurement["Reason"] = f"{type(e).__name__}: {e}"
             continue
         
-        # 분석 실패 또는 다리가 2개 미만인 경우 패스
-        if not result["ok"] or len(result["leg_results"]) < 2:
+        if not result["ok"] or len(result.get("leg_results", [])) < 2:
+            measurement["Reason"] = result.get("reason", "Fewer than two measured branches")
             continue
             
         leg_results = result["leg_results"]
@@ -193,8 +213,8 @@ def export_csv_and_viz_for_qc(image_dir, csv_path, output_csv_name="capillary_me
         v_l_x, v_l_y, v_r_x, v_r_y = get_lr_coordinates(ven_res)
 
         # 결과 리스트에 추가
-        results_list.append({
-            "Filename": img_name,
+        measurement.update({
+            "Status": "Measured", "Reason": "",
             "A_Diameter": round(art_res["max_d"], 2),
             "A_L_x": a_l_x, "A_L_y": a_l_y,
             "A_R_x": a_r_x, "A_R_y": a_r_y,
@@ -214,10 +234,51 @@ def export_csv_and_viz_for_qc(image_dir, csv_path, output_csv_name="capillary_me
     print(f"📄 CSV 결과: {save_path}")
     print(f"📁 QC 이미지: {viz_out_dir}/ (반드시 육안으로 확인하세요!)")
     print("="*60)
+    return df_out
+
+def main():
+    import argparse
+    from datetime import datetime
+    import json
+    from pathlib import Path
+    from dinov3_inputs import OUTPUT_ROOT, add_input_arguments, load_inputs, print_inputs
+
+    parser = argparse.ArgumentParser(description="Export 141 DINOv3 geometry measurements and QC images")
+    add_input_arguments(parser)
+    parser.add_argument("--output-dir", type=Path, default=None,
+                        help="New output directory; existing directories are never overwritten")
+    args = parser.parse_args()
+    inputs = load_inputs(args)
+    print_inputs(inputs)
+    if args.check:
+        return
+    if args.output_dir is not None:
+        output = args.output_dir.resolve()
+    else:
+        base = OUTPUT_ROOT / f"dinov3_{inputs.mask_source}_geometry_141_{datetime.now():%Y%m%d}"
+        output = base
+        number = 2
+        while output.exists():
+            output = base.with_name(f"{base.name}_run{number}")
+            number += 1
+    output.mkdir(parents=True, exist_ok=False)
+    table = export_csv_and_viz_for_qc(
+        str(inputs.root), str(inputs.coordinate_csv),
+        output_csv_name=str(output / "geometry_measurements_141.csv"),
+        image_files=inputs.image_files, df_keypoints=inputs.keypoints,
+        viz_out_dir=str(output / "qc_images"))
+    metadata = {
+        "encoder_name": "dinov3", "run_id": inputs.run_id,
+        "run_dir": str(inputs.run_dir), "mask_source": inputs.mask_source,
+        "mask_root": str(inputs.root), "selection_csv": str(inputs.selection_csv),
+        "predicted_coordinates_csv": str(inputs.coordinate_csv),
+        "selected_count": len(inputs.image_files),
+        "measured_count": int(table["Status"].eq("Measured").sum()),
+        "branch_labels": "A = thin branch, V = wide branch; estimated sides",
+        "purpose": "Geometry and visual QC export; use compare_measurements.py or compare_predicted_masks.py for agreement statistics",
+    }
+    (output / "provenance.json").write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
+
 
 if __name__ == "__main__":
-    # 영욱 님의 실제 데이터 경로 설정
-    CSV_PATH = r"capillary_keypoint_final.csv"
-    LABEL_DIR = r"D:\usb\MTL_dataset\label"
-    
-    export_csv_and_viz_for_qc(LABEL_DIR, CSV_PATH)
+    main()

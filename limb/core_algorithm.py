@@ -265,8 +265,24 @@ def choose_best_endpoint_for_leg(side_mask, seed_pt, D_xy, dir_v):
         positive_candidates.sort(key=lambda x: x[0], reverse=True)
         best_ep = positive_candidates[0][1]
     else:
-        fallback_candidates.sort(key=lambda x: x[0], reverse=True)
-        best_ep = fallback_candidates[0][1]
+        # A bottom limb can have no endpoint when a segmentation bridge joins
+        # its distal end back into the other limb. In that case the only true
+        # endpoint may point back toward the apex. Trace to the deepest
+        # reachable positive-projection skeleton point instead.
+        distal_points = []
+        for point, path_len in dist.items():
+            if point == seed_pt:
+                continue
+            proj = float(np.dot(np.array([point[1] - D_xy[0], point[0] - D_xy[1]],
+                                         dtype=float), dir_v))
+            if proj > 0.5:
+                distal_points.append((6.0 * proj + path_len, point))
+        if distal_points:
+            distal_points.sort(key=lambda x: x[0], reverse=True)
+            best_ep = distal_points[0][1]
+        else:
+            fallback_candidates.sort(key=lambda x: x[0], reverse=True)
+            best_ep = fallback_candidates[0][1]
 
     path = reconstruct_path(parent, best_ep)
     return best_ep, path, dist, parent
@@ -308,7 +324,13 @@ def extract_two_leg_paths(skeleton, apex_cut_pt, U_xy, D_xy, branch_pt=None):
         left_path = trace_leg_from_seed(left_mask, left_seed, D_xy, dir_v)
         right_path = trace_leg_from_seed(right_mask, right_seed, D_xy, dir_v)
 
-        valid_count = int(len(left_path) >= 4) + int(len(right_path) >= 4)
+        # A traced branch can point back toward the apex. It is only useful
+        # when a distal measurement path remains after the D/junction trim.
+        valid_count = sum(
+            bool(trim_path_for_measurement(path, U_xy, D_xy, current_branch,
+                                           min_keep=5, pixel_margin=0.5)[0])
+            for path in (left_path, right_path)
+        )
 
         result = {
             "paths": [left_path, right_path],

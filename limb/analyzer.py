@@ -60,9 +60,10 @@ def get_stable_max_diameter_raycast(
     branch_pt=None,
     tangent_half_window=3,
     use_branch_ray_gate=True,
-    # --- 유일한 튜닝 파라미터 ---
-    edt_ratio_max=1.1,          # raycast가 EDT 지름의 몇 배까지 허용할지
+    # Ray/EDT 일치성 기준. 별도의 topology gate는 candidate_mask로 받는다.
+    edt_ratio_max=1.5,          # raycast가 EDT 지름의 몇 배까지 허용할지
     max_diameter_px=None,       # (선택) 생리학적 상한. 모르면 None
+    candidate_mask=None,
 ):
     """
     각 지점에서 raycast 폭을 재고, EDT 참조값과 비교해서
@@ -70,11 +71,11 @@ def get_stable_max_diameter_raycast(
 
     Parameters
     ----------
-    edt_ratio_max : float, 기본 1.5
+    edt_ratio_max : float, 기본 1.1
         raycast_width / (2 * EDT)가 이 값을 넘으면 해당 지점 제외.
-        이론상 수직 측정이면 비율이 1.0 근처여야 하며,
-        이산화(정수 픽셀 반올림)와 약간의 접선 오차로 최대 ~1.3까지는 정상.
-        1.5는 "정상보다 50% 이상 부풀려진 측정"을 잘라낸다는 뜻.
+        픽셀 격자와 중심선 위치에 따른 오차가 있어 실험용 허용치로 해석한다.
+    candidate_mask : array-like of bool, optional
+        각 중심선 지점의 측정 가능 여부. 두 분지가 분리된 국소 단면만 허용한다.
 
     Returns
     -------
@@ -85,6 +86,12 @@ def get_stable_max_diameter_raycast(
     """
     N = len(trimmed_path)
     if N == 0:
+        return None
+
+    eligible = np.ones(N, dtype=bool) if candidate_mask is None else np.asarray(candidate_mask, dtype=bool)
+    if eligible.shape != (N,):
+        raise ValueError("candidate_mask must match trimmed_path length")
+    if not eligible.any():
         return None
 
     ys = np.array([p[0] for p in trimmed_path], dtype=float)
@@ -133,11 +140,11 @@ def get_stable_max_diameter_raycast(
         d_neg_arr[i] = d_neg
 
     # ===========================================================
-    # EDT로 "각 지점의 내접원 지름" 계산 (접선과 무관한 독립 지표)
+    # EDT로 같은 예측 마스크의 국소 내접원 지름을 계산한다.
     # ===========================================================
     # EDT[y, x] = (y, x)에서 혈관 경계까지의 최단거리.
     # 2 * EDT = 그 점을 중심으로 혈관 안에 들어갈 수 있는 최대 원의 지름.
-    # 이 값은 수직이 맞든 틀리든 항상 "국소 두께"의 정답에 가깝다.
+    # EDT는 과도하게 기울어진 ray를 거르는 보조값이며 독립적인 정답은 아니다.
     edt = distance_transform_edt(binary_image)
     yi = np.clip(ys.astype(int), 0, h - 1)
     xi = np.clip(xs.astype(int), 0, w - 1)
@@ -149,7 +156,7 @@ def get_stable_max_diameter_raycast(
     # 정상 측정: widths_raw ≈ 2*EDT (비율 1.0 근처)
     # 꺾인 혈관에서 pv 오정렬: widths_raw >> 2*EDT (비율이 2~5배로 튐)
     ratio = widths_raw / np.maximum(edt_diameters, 1e-6)
-    valid = ratio <= edt_ratio_max
+    valid = (ratio <= edt_ratio_max) & eligible
 
     # (선택) 문헌 기반 절대 상한 — 알고 있으면 추가 방어선
     if max_diameter_px is not None:
@@ -158,7 +165,7 @@ def get_stable_max_diameter_raycast(
     # 전부 탈락하면 EDT 자체를 폴백으로 사용 (raycast 포기)
     # 이 경우 "이 다리는 전 구간이 꺾임" → EDT 최대값이 가장 합리적 추정
     if not valid.any():
-        best_idx = int(np.argmax(edt_diameters))
+        best_idx = int(np.argmax(np.where(eligible, edt_diameters, -np.inf)))
         return _build_result(
             best_idx, xs, ys, pvs, widths_raw, d_pos_arr, d_neg_arr,
             edt_diameters, valid, used_fallback=True,
@@ -167,13 +174,55 @@ def get_stable_max_diameter_raycast(
     # ===========================================================
     # 유효점 중에서 최대값 선택
     # ===========================================================
-    widths_masked = np.where(valid, widths_raw, -np.inf)
-    best_idx = int(np.argmax(widths_masked))
+    best_idx = int(np.argmax(np.where(valid, widths_raw, -np.inf)))
 
     return _build_result(
         best_idx, xs, ys, pvs, widths_raw, d_pos_arr, d_neg_arr,
         edt_diameters, valid, used_fallback=False,
     )
+
+
+def separated_limb_candidates(path, other_path, binary_image, dir_v, edt):
+    """Keep path points where two limb centerlines have a background gap.
+
+    If one path continues after the other terminates, its distal points are not
+    two measurable limbs. A foreground bridge between the two centerlines is
+    likewise an overlap/junction, not an isolated limb cross-section.
+    """
+    result = np.zeros(len(path), dtype=bool)
+    if not path or not other_path:
+        return result
+    path_xy = np.asarray([(x, y) for y, x in path], dtype=float)
+    other_xy = np.asarray([(x, y) for y, x in other_path], dtype=float)
+    height, width = binary_image.shape
+    for index, center in enumerate(path_xy):
+        first = path_xy[max(0, index - 3)]
+        last = path_xy[min(len(path_xy) - 1, index + 3)]
+        tangent = last - first
+        norm = float(np.linalg.norm(tangent))
+        tangent = tangent / norm if norm > 1e-6 else np.asarray(dir_v, dtype=float)
+        radius = float(edt[int(center[1]), int(center[0])])
+        # Compare centerlines at the same local transverse plane. A distant
+        # section of a strongly curved opposite limb is not a paired section.
+        longitudinal = np.abs((other_xy - center) @ tangent)
+        nearby = np.flatnonzero(longitudinal <= max(2.0, radius))
+        if len(nearby) == 0:
+            continue
+        delta = other_xy[nearby] - center
+        nearest = other_xy[nearby[np.argmin(np.sum(delta * delta, axis=1))]]
+        length = float(np.linalg.norm(nearest - center))
+        if length < 4.0:
+            continue
+        steps = max(2, int(np.ceil(length * 2)))
+        xs = np.rint(np.linspace(center[0], nearest[0], steps + 1)).astype(int)
+        ys = np.rint(np.linspace(center[1], nearest[1], steps + 1)).astype(int)
+        if np.any(xs < 0) or np.any(xs >= width) or np.any(ys < 0) or np.any(ys >= height):
+            continue
+        # Exclude one pixel around each centerline; a background run of at
+        # least two samples (1 px at this sampling rate) establishes a gap.
+        background = ~binary_image[ys[2:-2], xs[2:-2]]
+        result[index] = bool(np.any(background[:-1] & background[1:]))
+    return result
 
 
 # -----------------------------------------------------------------
@@ -336,6 +385,14 @@ def analyze_single_image(image_path, df_keypoints):
         labeled_mask[right_vessel_mask] = 2
 
     leg_results = []
+    global_edt = distance_transform_edt(binary_image)
+
+    trimmed_paths = [
+        trim_path_for_measurement(path, U_xy, D_xy, used_branch_pt,
+                                  min_keep=5, pixel_margin=0.5)[0]
+        if len(path) >= 2 else []
+        for path in raw_paths
+    ]
 
     '''
     path는 원래 전체 다리
@@ -346,10 +403,13 @@ def analyze_single_image(image_path, df_keypoints):
         if len(path) < 2:
             continue
 
-        trimmed_path, start_pt, end_pt, _ = trim_path_for_measurement(
-            path, U_xy, D_xy, used_branch_pt, min_keep=5, pixel_margin=0.5,
-        )
+        trimmed_path = trimmed_paths[idx]
         if len(trimmed_path) == 0:
+            continue
+
+        topology_candidates = separated_limb_candidates(
+            trimmed_path, trimmed_paths[1 - idx], binary_image, dir_v, global_edt)
+        if not topology_candidates.any():
             continue
 
         # 두께 측정 부분 
@@ -365,6 +425,7 @@ def analyze_single_image(image_path, df_keypoints):
             branch_pt=used_branch_pt,
             tangent_half_window=3,
             use_branch_ray_gate=True,
+            candidate_mask=topology_candidates,
         )
         if stable_res is None:
             continue
@@ -382,11 +443,15 @@ def analyze_single_image(image_path, df_keypoints):
             "mean_x": float(np.mean(trimmed_xs)),
             "path": path,
             "trimmed_path": trimmed_path,
-            "start_pt": start_pt,
-            "end_pt": end_pt,
+            "start_pt": trimmed_path[0],
+            "end_pt": trimmed_path[-1],
             "radii_raw": stable_res["widths_raw"],
             "radii_s": stable_res["widths_s"],
             "plateau_idx": stable_res["plateau_idx"],
+            "topology_eligible_points": int(topology_candidates.sum()),
+            "ray_valid_points": int(stable_res["n_valid"]),
+            "path_points": int(stable_res["n_total"]),
+            "used_edt_fallback": bool(stable_res["used_edt_fallback"]),
         })
 
     if len(leg_results) == 0:

@@ -6,16 +6,16 @@ from analyzer import analyze_single_image
 
 
 class CapillaryViewer:
-    def __init__(self, image_dir, csv_path):
+    def __init__(self, image_dir, csv_path, image_files=None, df_keypoints=None):
         self.image_dir = image_dir
         self.csv_path = csv_path
 
-        self.df_keypoints = pd.read_csv(csv_path)
+        self.df_keypoints = (pd.read_csv(csv_path) if df_keypoints is None else df_keypoints)
 
         valid_ext = (".tif", ".tiff", ".png", ".jpg", ".jpeg", ".bmp")
-        self.image_files = sorted(
+        self.image_files = (list(image_files) if image_files is not None else sorted(
             [f for f in os.listdir(image_dir) if f.lower().endswith(valid_ext)]
-        )
+        ))
 
         if len(self.image_files) == 0:
             raise FileNotFoundError(f"이미지 파일이 없습니다: {image_dir}")
@@ -260,13 +260,19 @@ class CapillaryViewer:
         self.fig.canvas.draw()
 
 
-if __name__ == "__main__":
-    CSV_PATH = r"capillary_keypoint_final.csv"
-    LABEL_DIR = r"D:\usb\MTL_dataset\label"
+def main():
+    import argparse
+    from dinov3_inputs import add_input_arguments, load_inputs, print_inputs
 
-    if not os.path.exists(CSV_PATH):
-        print(f"CSV 파일이 없습니다: {CSV_PATH}")
-    elif not os.path.exists(LABEL_DIR):
-        print(f"라벨 폴더가 없습니다: {LABEL_DIR}")
-    else:
-        CapillaryViewer(LABEL_DIR, CSV_PATH)
+    parser = argparse.ArgumentParser(description="View the selected 141 DINOv3 diameter measurements")
+    add_input_arguments(parser)
+    args = parser.parse_args()
+    inputs = load_inputs(args)
+    print_inputs(inputs)
+    if not args.check:
+        CapillaryViewer(str(inputs.root), str(inputs.coordinate_csv),
+                        image_files=inputs.image_files, df_keypoints=inputs.keypoints)
+
+
+if __name__ == "__main__":
+    main()
